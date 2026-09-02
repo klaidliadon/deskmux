@@ -1,0 +1,8 @@
+# build output
+*.exe
+
+# runtime logs
+*.log
+
+# local configuration (the template lives in config/template.go)
+lginput.yaml
