@@ -19,18 +19,18 @@ import (
 // "auto input switch" setting cannot do this handover. Pushing early works
 // because a panel will happily sit on an input that has no signal yet.
 func (a *App) Watch(ctx context.Context) error {
-	match := a.cfg.Watch.Match
-	if len(match) == 0 {
+	matcher := newDeviceMatcher(a.cfg.Watch.Match)
+	if matcher.empty() {
 		return errors.New("watch.match is empty: nothing to watch for")
 	}
 
-	present, id, err := devicePresent(match)
+	present, id, err := matcher.find()
 	if err != nil {
 		return err
 	}
 
 	a.log.Info("watching for device",
-		"match", strings.Join(match, ","),
+		"match", strings.Join(a.cfg.Watch.Match, ","),
 		"poll", a.cfg.Watch.Poll.D(),
 		"present_at_start", present,
 		"matched", id,
@@ -49,7 +49,7 @@ func (a *App) Watch(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
-		now, matched, err := devicePresent(match)
+		now, matched, err := matcher.find()
 		if err != nil {
 			a.log.Warn("device scan failed", "err", err)
 			continue

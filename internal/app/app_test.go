@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"syscall"
 	"testing"
 
@@ -122,6 +123,29 @@ func TestSplitMultiSz(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDeviceMatcher(t *testing.T) {
+	m := newDeviceMatcher([]string{"vid_1e91", "  VEN_OWC_TB3  ", "", "   "})
+
+	if got := len(m.needles); got != 2 {
+		t.Fatalf("needles = %d, want 2 (blank entries dropped)", got)
+	}
+	for _, needle := range m.needles {
+		if needle != strings.ToUpper(needle) {
+			t.Errorf("needle %q was not folded at construction", needle)
+		}
+	}
+
+	if newDeviceMatcher(nil).empty() != true {
+		t.Error("nil match list should report empty")
+	}
+	if newDeviceMatcher([]string{" "}).empty() != true {
+		t.Error("whitespace-only match list should report empty")
+	}
+	if m.empty() {
+		t.Error("populated matcher reported empty")
 	}
 }
 

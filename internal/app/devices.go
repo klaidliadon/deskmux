@@ -52,9 +52,29 @@ func splitMultiSz(b []uint16) []string {
 	return out
 }
 
-// devicePresent reports whether any watched signature is enumerated, and
-// which one matched.
-func devicePresent(match []string) (bool, string, error) {
+// deviceMatcher tests device IDs against a set of substrings.
+//
+// The needles are folded once at construction. Folding them inside the scan
+// meant re-uppercasing every match string for every enumerated device --
+// around a thousand redundant allocations per poll, which showed up as most
+// of a percent of a CPU core in a process that is supposed to be idle.
+type deviceMatcher struct{ needles []string }
+
+func newDeviceMatcher(match []string) deviceMatcher {
+	needles := make([]string, 0, len(match))
+	for _, m := range match {
+		if m = strings.TrimSpace(m); m != "" {
+			needles = append(needles, strings.ToUpper(m))
+		}
+	}
+	return deviceMatcher{needles: needles}
+}
+
+func (d deviceMatcher) empty() bool { return len(d.needles) == 0 }
+
+// find reports whether any watched signature is enumerated, and which device
+// matched.
+func (d deviceMatcher) find() (bool, string, error) {
 	ids, err := presentDeviceIDs()
 	if err != nil {
 		return false, "", err
@@ -62,8 +82,8 @@ func devicePresent(match []string) (bool, string, error) {
 
 	for _, id := range ids {
 		upper := strings.ToUpper(id)
-		for _, m := range match {
-			if strings.Contains(upper, strings.ToUpper(m)) {
+		for _, needle := range d.needles {
+			if strings.Contains(upper, needle) {
 				return true, id, nil
 			}
 		}
