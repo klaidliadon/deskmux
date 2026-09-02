@@ -39,13 +39,7 @@ func (a *App) Watch(ctx context.Context) error {
 	ticker := time.NewTicker(a.cfg.Watch.Poll.D())
 	defer ticker.Stop()
 
-	// Device arrival enumerates as a burst, so require a reading to hold for
-	// two consecutive polls before acting on it.
-	const stableReads = 2
-
-	state := present
-	pending := present
-	var stable int
+	debounce := newDebouncer(present, _stableReads)
 
 	for {
 		select {
@@ -60,19 +54,10 @@ func (a *App) Watch(ctx context.Context) error {
 			a.log.Warn("device scan failed", "err", err)
 			continue
 		}
-
-		if now != pending {
-			pending, stable = now, 0
-			continue
-		}
-		if now == state {
-			continue
-		}
-		if stable++; stable < stableReads {
+		if !debounce.observe(now) {
 			continue
 		}
 
-		state, stable = now, 0
 		if now {
 			a.log.Info("dock connected", "matched", matched)
 			a.applyProfile(a.cfg.Watch.OnDock, "dock")
@@ -81,6 +66,44 @@ func (a *App) Watch(ctx context.Context) error {
 			a.applyProfile(a.cfg.Watch.OnUndock, "undock")
 		}
 	}
+}
+
+// Device arrival enumerates as a burst as each function of a dock appears, so
+// a reading has to hold before it is believed.
+const _stableReads = 2
+
+// debouncer reports a state change only once a new reading has held for a
+// number of consecutive observations.
+type debouncer struct {
+	state   bool
+	pending bool
+	stable  int
+	needed  int
+}
+
+func newDebouncer(initial bool, needed int) *debouncer {
+	return &debouncer{state: initial, pending: initial, needed: needed}
+}
+
+// observe records a reading and reports whether it constitutes a change.
+//
+// The first sighting of a new value counts towards the total, so needed=2
+// means two observations, not three. Starting the count at zero here was an
+// off-by-one that made the watcher react a whole poll later than configured.
+func (d *debouncer) observe(reading bool) (changed bool) {
+	switch {
+	case reading != d.pending:
+		d.pending, d.stable = reading, 1
+	case reading != d.state:
+		d.stable++
+	}
+
+	if reading == d.state || d.stable < d.needed {
+		return false
+	}
+
+	d.state, d.stable = reading, 0
+	return true
 }
 
 // applyProfile is best-effort: one failing step must not abort the rest, so

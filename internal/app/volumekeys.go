@@ -24,10 +24,11 @@ var (
 	_unhookWindows  = _user32.NewProc("UnhookWindowsHookEx")
 	_getMessage     = _user32.NewProc("GetMessageW")
 	_postThreadMsg  = _user32.NewProc("PostThreadMessageW")
-	_kernel32       = syscall.NewLazyDLL("kernel32.dll")
-	_getCurrentTID  = _kernel32.NewProc("GetCurrentThreadId")
-	_createMutex    = _kernel32.NewProc("CreateMutexW")
-	_closeHandleFn  = _kernel32.NewProc("CloseHandle")
+
+	_kernel32      = syscall.NewLazyDLL("kernel32.dll")
+	_getCurrentTID = _kernel32.NewProc("GetCurrentThreadId")
+	_createMutex   = _kernel32.NewProc("CreateMutexW")
+	_closeHandle   = _kernel32.NewProc("CloseHandle")
 )
 
 const (
@@ -42,11 +43,15 @@ const (
 	_vkVolumeUp   = 0xAF
 
 	_errorAlreadyExists = 183
+
+	// MCCS audio mute values.
+	_muteOn  vcp.Level = 1
+	_muteOff vcp.Level = 2
 )
 
 // ErrAlreadyRunning reports a second instance. Two keyboard hooks would both
 // swallow every volume key and both write the monitor, which presents as
-// erratic double-stepping rather than an obvious failure.
+// erratic double-stepping rather than as an obvious failure.
 var ErrAlreadyRunning = errors.New("another instance is already running")
 
 type kbdLLHookStruct struct {
@@ -66,15 +71,25 @@ type winMsg struct {
 	Pt      struct{ X, Y int32 }
 }
 
-// volumeState is shared between the hook thread and the writer goroutine.
+// volumeState is the handoff between the hook thread, which must return
+// promptly, and the writer, which performs slow DDC transactions.
 type volumeState struct {
-	mu      sync.Mutex
-	target  int
-	muted   bool
-	dirty   bool
-	muteReq bool
+	mu       sync.Mutex
+	target   int
+	maxLevel int
+	muted    bool
+	dirty    bool
+	muteReq  bool
 
 	wake chan struct{}
+}
+
+func newVolumeState(level, maxLevel int) *volumeState {
+	return &volumeState{
+		target:   level,
+		maxLevel: maxLevel,
+		wake:     make(chan struct{}, 1),
+	}
 }
 
 func (s *volumeState) nudge() {
@@ -84,9 +99,9 @@ func (s *volumeState) nudge() {
 	}
 }
 
-func (s *volumeState) adjust(delta, maxLevel int) {
+func (s *volumeState) adjust(delta int) {
 	s.mu.Lock()
-	s.target = min(max(s.target+delta, 0), maxLevel)
+	s.target = min(max(s.target+delta, 0), s.maxLevel)
 	s.dirty = true
 	s.mu.Unlock()
 	s.nudge()
@@ -98,6 +113,28 @@ func (s *volumeState) toggleMute() {
 	s.muteReq = true
 	s.mu.Unlock()
 	s.nudge()
+}
+
+// pending atomically takes the outstanding work and clears the flags.
+func (s *volumeState) pending() (target int, wantLevel, wantMute, muted bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	target, wantLevel, wantMute, muted = s.target, s.dirty, s.muteReq, s.muted
+	s.dirty, s.muteReq = false, false
+	return target, wantLevel, wantMute, muted
+}
+
+// syncTo adopts a level observed on the monitor, unless a write is queued.
+func (s *volumeState) syncTo(level int) (adopted bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.dirty || s.target == level {
+		return false
+	}
+	s.target = level
+	return true
 }
 
 // VolumeKeys makes the volume keys drive the monitor's own volume instead of
@@ -119,207 +156,231 @@ func (a *App) VolumeKeys(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("reach the monitor over DDC: %w", err)
 	}
-	cur, err := m.GetVCP(a.cfg.Registers.Volume)
+	current, err := m.GetVCP(a.cfg.Registers.Volume)
 	set.Close()
 	if err != nil {
 		return fmt.Errorf("read volume register: %w", err)
 	}
 
-	maxLevel := int(cur.Max)
+	maxLevel := int(current.Max)
 	if maxLevel <= 0 {
 		maxLevel = 100
 	}
 
-	state := &volumeState{target: int(cur.Current), wake: make(chan struct{}, 1)}
+	state := newVolumeState(int(current.Current), maxLevel)
 	a.log.Info("volume keys bound to monitor",
 		"level", state.target, "max", maxLevel, "step", cfg.Step, "audio_match", cfg.AudioMatch)
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Goroutines are supervised rather than fired and forgotten: every one is
-	// waited on before returning, so the hook is always unhooked cleanly.
-	var wg sync.WaitGroup
-	var active atomic.Bool
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		a.runVolumeWriter(ctx, state, maxLevel)
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		a.trackPlaybackDevice(ctx, &active)
-	}()
-
-	hookErr := make(chan error, 1)
-	threadID := make(chan uint32, 1)
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		runKeyboardHook(ctx, state, &active, cfg.Step, maxLevel, hookErr, threadID)
-	}()
-
-	// The hook thread parks in GetMessage, which only returns when a message
-	// arrives, so shutdown must post WM_QUIT to it. Every exit path below
-	// therefore runs through stopHook: taking ctx.Done() here without waking
-	// the thread would leave it blocked forever and hang wg.Wait().
+	// Every goroutine is waited on before returning, so the hook is always
+	// unhooked and the DDC handle always released.
 	var (
-		tid     uint32
-		haveTID bool
-		runErr  error
+		wg     sync.WaitGroup
+		active atomic.Bool
 	)
 
-	stopHook := func() {
-		if !haveTID {
-			// The hook may have started between the select and here.
-			select {
-			case tid = <-threadID:
-				haveTID = true
-			default:
-			}
-		}
-		if haveTID {
-			_postThreadMsg.Call(uintptr(tid), _wmQuit, 0, 0)
-		}
-		cancel()
-		wg.Wait()
-	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		a.runVolumeWriter(ctx, state)
+	}()
 
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		a.newDeviceTracker(&active).run(ctx)
+	}()
+
+	hook := newKeyHook(state, &active, cfg.Step)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		hook.run()
+	}()
+
+	// The hook thread parks in GetMessage, which returns only when a message
+	// arrives, so shutdown must post WM_QUIT to it. Taking ctx.Done() without
+	// waking the thread would leave it blocked and hang wg.Wait(), so every
+	// exit path goes through hook.stop().
+	var runErr error
 	select {
-	case tid = <-threadID:
-		haveTID = true
-	case err := <-hookErr:
-		runErr = err
-	case <-ctx.Done():
-	}
-
-	if runErr == nil && haveTID {
+	case <-hook.ready:
 		a.log.Info("listening for volume keys")
 		select {
 		case <-ctx.Done():
-		case err := <-hookErr:
+		case err := <-hook.done:
 			if err != nil {
 				a.log.Error("keyboard hook ended", "err", err)
 			}
 		}
+	case err := <-hook.done:
+		runErr = err
+	case <-ctx.Done():
 	}
 
-	stopHook()
+	hook.stop()
+	cancel()
+	wg.Wait()
+
 	a.log.Info("volume keys released")
 	return runErr
 }
 
-// runKeyboardHook owns the hook and its message loop, and must stay on one OS
-// thread for the hook's lifetime.
-func runKeyboardHook(
-	ctx context.Context,
-	state *volumeState,
-	active *atomic.Bool,
-	step, maxLevel int,
-	errc chan<- error,
-	tidc chan<- uint32,
-) {
+// keyHook owns the low-level keyboard hook and the message loop that keeps it
+// alive. The hook must live on a single OS thread for its whole lifetime.
+type keyHook struct {
+	state  *volumeState
+	active *atomic.Bool
+	step   int
+
+	ready chan uint32 // carries the thread id once the hook is installed
+	done  chan error
+
+	tid     uint32
+	haveTID bool
+}
+
+func newKeyHook(state *volumeState, active *atomic.Bool, step int) *keyHook {
+	return &keyHook{
+		state:  state,
+		active: active,
+		step:   step,
+		ready:  make(chan uint32, 1),
+		done:   make(chan error, 1),
+	}
+}
+
+func (h *keyHook) run() {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	callback := syscall.NewCallback(func(code int32, wParam, lParam uintptr) uintptr {
-		// Only hijack the keys while the monitor is the playback device. On
-		// headphones the keys must behave normally: Windows' own flyout and
-		// per-endpoint volume are correct there, and the monitor's register
-		// would be adjusting something nobody is listening to.
-		if code == 0 && (wParam == _wmKeyDown || wParam == _wmSysKeyDown) && active.Load() {
-			k := (*kbdLLHookStruct)(unsafe.Pointer(lParam))
-			switch k.VkCode {
-			case _vkVolumeUp:
-				state.adjust(step, maxLevel)
-				return 1 // swallow
-			case _vkVolumeDown:
-				state.adjust(-step, maxLevel)
-				return 1
-			case _vkVolumeMute:
-				state.toggleMute()
-				return 1
-			}
-		}
-		r, _, _ := _callNextHook.Call(0, uintptr(code), wParam, lParam)
-		return r
-	})
+	callback := syscall.NewCallback(h.onKey)
 
-	hook, _, callErr := _setWindowsHook.Call(_whKeyboardLL, callback, 0, 0)
-	if hook == 0 {
-		errc <- fmt.Errorf("SetWindowsHookEx: %w", callErr)
+	handle, _, callErr := _setWindowsHook.Call(_whKeyboardLL, callback, 0, 0)
+	if handle == 0 {
+		h.done <- fmt.Errorf("SetWindowsHookEx: %w", callErr)
 		return
 	}
-	defer _unhookWindows.Call(hook)
+	defer _unhookWindows.Call(handle)
 
 	tid, _, _ := _getCurrentTID.Call()
-	tidc <- uint32(tid)
+	h.ready <- uint32(tid)
 
 	var msg winMsg
 	for {
 		r, _, _ := _getMessage.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
 		if int32(r) <= 0 { // 0 = WM_QUIT, -1 = error
-			errc <- nil
-			return
-		}
-		if ctx.Err() != nil {
-			errc <- nil
+			h.done <- nil
 			return
 		}
 	}
 }
 
-// runVolumeWriter writes on the leading edge so a single key press is not
-// delayed, then rate-limits while a key is held.
-//
-// The DDC handle is held open for the whole loop: re-enumerating per write
-// costs tens of milliseconds and was the dominant source of input lag.
-func (a *App) runVolumeWriter(ctx context.Context, state *volumeState, maxLevel int) {
-	var (
-		set *ddc.Set
-		mon ddc.Monitor
-	)
+// onKey must return promptly: a slow hook is silently unhooked by Windows. It
+// only records the intent and wakes the writer, which does the DDC work.
+func (h *keyHook) onKey(code int32, wParam, lParam uintptr) uintptr {
+	// Only hijack the keys while the monitor is the playback device. On
+	// headphones they must behave normally: Windows' own flyout and
+	// per-endpoint volume are correct there, and the monitor's register would
+	// be adjusting something nobody is listening to.
+	if code == 0 && (wParam == _wmKeyDown || wParam == _wmSysKeyDown) && h.active.Load() {
+		k := (*kbdLLHookStruct)(unsafe.Pointer(lParam))
+		switch k.VkCode {
+		case _vkVolumeUp:
+			h.state.adjust(h.step)
+			return 1 // swallow
+		case _vkVolumeDown:
+			h.state.adjust(-h.step)
+			return 1
+		case _vkVolumeMute:
+			h.state.toggleMute()
+			return 1
+		}
+	}
 
-	open := func() error {
-		s, m, err := a.openMonitor()
-		if err != nil {
+	r, _, _ := _callNextHook.Call(0, uintptr(code), wParam, lParam)
+	return r
+}
+
+// stop wakes the message loop so run can unhook and return.
+func (h *keyHook) stop() {
+	if !h.haveTID {
+		select {
+		case h.tid = <-h.ready:
+			h.haveTID = true
+		default:
+		}
+	}
+	if h.haveTID {
+		_postThreadMsg.Call(uintptr(h.tid), _wmQuit, 0, 0)
+	}
+}
+
+// volumeSession keeps one DDC handle open for the writer's lifetime.
+//
+// Re-enumerating per write (EnumDisplayMonitors, GetPhysicalMonitors,
+// Destroy) costs tens of milliseconds and was the dominant source of input
+// lag when the keys felt sluggish.
+type volumeSession struct {
+	app *App
+	set *ddc.Set
+	mon ddc.Monitor
+}
+
+func (s *volumeSession) open() error {
+	set, mon, err := s.app.openMonitor()
+	if err != nil {
+		return err
+	}
+	s.set, s.mon = set, mon
+	return nil
+}
+
+func (s *volumeSession) close() {
+	if s.set != nil {
+		s.set.Close()
+		s.set = nil
+	}
+}
+
+func (s *volumeSession) ready() bool { return s.set != nil }
+
+// write reopens the handle once if it has gone stale, which happens whenever
+// the panel's DDC engine drops out and comes back.
+func (s *volumeSession) write(code vcp.Code, value vcp.Level) error {
+	if s.set == nil {
+		if err := s.open(); err != nil {
 			return err
 		}
-		set, mon = s, m
-		return nil
 	}
-	closeSession := func() {
-		if set != nil {
-			set.Close()
-			set = nil
+	if err := s.mon.SetVCPOnce(code, value); err != nil {
+		s.close()
+		if err := s.open(); err != nil {
+			return err
 		}
+		return s.mon.SetVCPOnce(code, value)
 	}
-	defer closeSession()
+	return nil
+}
 
-	if err := open(); err != nil {
+func (s *volumeSession) read(code vcp.Code) (ddc.Reading, error) {
+	if s.set == nil {
+		return ddc.Reading{}, ddc.ErrNoMonitors
+	}
+	return s.mon.GetVCP(code)
+}
+
+// runVolumeWriter writes on the leading edge so a single key press is never
+// delayed, then rate-limits while a key is held.
+func (a *App) runVolumeWriter(ctx context.Context, state *volumeState) {
+	session := &volumeSession{app: a}
+	defer session.close()
+
+	if err := session.open(); err != nil {
 		a.log.Error("cannot open DDC session", "err", err)
-	}
-
-	// write reopens the handle once if it has gone stale, which happens when
-	// the panel's DDC engine drops out and comes back.
-	write := func(code vcp.Code, value vcp.Level) error {
-		if set == nil {
-			if err := open(); err != nil {
-				return err
-			}
-		}
-		if err := mon.SetVCPOnce(code, value); err != nil {
-			closeSession()
-			if err := open(); err != nil {
-				return err
-			}
-			return mon.SetVCPOnce(code, value)
-		}
-		return nil
 	}
 
 	resync := time.NewTicker(a.cfg.VolumeKeys.Resync.D())
@@ -331,47 +392,28 @@ func (a *App) runVolumeWriter(ctx context.Context, state *volumeState, maxLevel 
 			return
 
 		case <-resync.C:
-			// Anything else can move the register behind our back: another
-			// lginput call, a profile handoff, or the other machine while it
-			// had the panel. Re-read so the next key press steps from the
-			// real level rather than a stale one.
-			if set == nil {
-				continue
-			}
-			v, err := mon.GetVCP(a.cfg.Registers.Volume)
-			if err != nil {
-				continue
-			}
-			state.mu.Lock()
-			if !state.dirty && int(v.Current) != state.target {
-				a.log.Debug("volume changed externally", "was", state.target, "now", v.Current)
-				state.target = int(v.Current)
-			}
-			state.mu.Unlock()
+			a.resyncVolume(session, state)
 			continue
 
 		case <-state.wake:
 		}
 
-		state.mu.Lock()
-		target, dirty, muteReq, muted := state.target, state.dirty, state.muteReq, state.muted
-		state.dirty, state.muteReq = false, false
-		state.mu.Unlock()
+		target, wantLevel, wantMute, muted := state.pending()
 
-		if muteReq {
-			value := vcp.Level(2) // 1 mutes, 2 unmutes
+		if wantMute {
+			value := _muteOff
 			if muted {
-				value = 1
+				value = _muteOn
 			}
-			if err := write(a.cfg.Registers.Mute, value); err != nil {
+			if err := session.write(a.cfg.Registers.Mute, value); err != nil {
 				a.log.Warn("mute write failed", "err", err)
 			} else {
 				a.log.Info("mute", "muted", muted)
 			}
 		}
 
-		if dirty {
-			if err := write(a.cfg.Registers.Volume, vcp.Level(target)); err != nil {
+		if wantLevel {
+			if err := session.write(a.cfg.Registers.Volume, vcp.Level(target)); err != nil {
 				a.log.Warn("volume write failed", "level", target, "err", err)
 			} else {
 				a.log.Debug("volume", "level", target)
@@ -387,41 +429,67 @@ func (a *App) runVolumeWriter(ctx context.Context, state *volumeState, maxLevel 
 	}
 }
 
-// trackPlaybackDevice follows the default playback device and owns endpoint
+// resyncVolume adopts a level set by something else: another lginput call, a
+// dock profile, or the other machine while it had the panel.
+func (a *App) resyncVolume(session *volumeSession, state *volumeState) {
+	if !session.ready() {
+		return
+	}
+
+	reading, err := session.read(a.cfg.Registers.Volume)
+	if err != nil {
+		return
+	}
+	if state.syncTo(int(reading.Current)) {
+		a.log.Debug("volume changed externally, resynced", "level", reading.Current)
+	}
+}
+
+// deviceTracker follows the default playback device and owns endpoint
 // pinning, which applies only while the monitor is that device.
-func (a *App) trackPlaybackDevice(ctx context.Context, active *atomic.Bool) {
+type deviceTracker struct {
+	app    *App
+	active *atomic.Bool
+	match  string
+
+	lastID  string
+	first   bool
+	matched bool
+	since   int
+}
+
+func (a *App) newDeviceTracker(active *atomic.Bool) *deviceTracker {
+	return &deviceTracker{
+		app:    a,
+		active: active,
+		match:  strings.ToUpper(a.cfg.VolumeKeys.AudioMatch),
+		first:  true,
+	}
+}
+
+func (t *deviceTracker) run(ctx context.Context) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
 	uninit, err := winaudio.InitCOM()
 	if err != nil {
-		a.log.Error("audio watch disabled", "err", err)
+		t.app.log.Error("audio watch disabled", "err", err)
 		return
 	}
 	defer uninit()
 
 	session, err := winaudio.NewSession()
 	if err != nil {
-		a.log.Error("audio watch disabled", "err", err)
+		t.app.log.Error("audio watch disabled", "err", err)
 		return
 	}
 	defer session.Close()
 
-	cfg := a.cfg.VolumeKeys
-	match := strings.ToUpper(cfg.AudioMatch)
-
-	ticker := time.NewTicker(cfg.AudioPoll.D())
+	ticker := time.NewTicker(t.app.cfg.VolumeKeys.AudioPoll.D())
 	defer ticker.Stop()
 
-	const driftEvery = 10
-
-	var lastID string
-	first := true
-	var matched bool
-	var since int
-
 	for {
-		a.pollPlaybackDevice(session, match, &lastID, &first, &matched, &since, driftEvery, active)
+		t.poll(session)
 
 		select {
 		case <-ctx.Done():
@@ -431,66 +499,67 @@ func (a *App) trackPlaybackDevice(ctx context.Context, active *atomic.Bool) {
 	}
 }
 
-// pollPlaybackDevice compares device IDs, which is far cheaper than reading
-// friendly names, and only pays for the name when the device actually changed.
-func (a *App) pollPlaybackDevice(
-	session *winaudio.Session,
-	match string,
-	lastID *string,
-	first *bool,
-	matched *bool,
-	since *int,
-	driftEvery int,
-	active *atomic.Bool,
-) {
-	dev, err := session.DefaultRender()
+// driftChecks is how many polls pass between endpoint-level checks. Reading
+// the level is cheap but not free, and drift is rare.
+const driftChecks = 10
+
+// poll compares device IDs, which is far cheaper than reading friendly names,
+// and pays for the name only when the device actually changed.
+func (t *deviceTracker) poll(session *winaudio.Session) {
+	device, err := session.DefaultRender()
 	if err != nil {
 		return
 	}
-	defer dev.Release()
+	defer device.Release()
 
-	id, err := dev.ID()
+	id, err := device.ID()
 	if err != nil {
 		return
 	}
 
-	if id != *lastID || *first {
-		name, err := dev.Name()
-		nowMatched := err == nil && strings.Contains(strings.ToUpper(name), match)
-		active.Store(nowMatched)
-
-		if !*first {
-			if nowMatched {
-				a.log.Info("playback device changed: volume keys drive the monitor", "device", name)
-			} else {
-				a.log.Info("playback device changed: volume keys handed back to Windows", "device", name)
-			}
-		}
-
-		if nowMatched && a.cfg.VolumeKeys.PinWindows {
-			if before, err := dev.PinToMax(); err == nil && before < 0.999 {
-				a.log.Info("windows endpoint pinned to 100%", "was", fmt.Sprintf("%.0f%%", before*100))
-			}
-		}
-
-		*lastID, *matched, *first, *since = id, nowMatched, false, 0
+	if id != t.lastID || t.first {
+		t.onDeviceChanged(device, id)
 		return
 	}
 
-	if !*matched || !a.cfg.VolumeKeys.PinWindows {
+	if !t.matched || !t.app.cfg.VolumeKeys.PinWindows {
 		return
 	}
-	if *since++; *since < driftEvery {
+	if t.since++; t.since < driftChecks {
 		return
 	}
-	*since = 0
+	t.since = 0
 
-	if v, err := dev.Volume(); err == nil && v < 0.999 {
-		if _, err := dev.PinToMax(); err == nil {
-			a.log.Info("windows endpoint drifted, re-pinned", "was", fmt.Sprintf("%.0f%%", v*100))
+	if level, err := device.Volume(); err == nil && level < 0.999 {
+		if _, err := device.PinToMax(); err == nil {
+			t.app.log.Info("windows endpoint drifted, re-pinned", "was", percent(level))
 		}
 	}
 }
+
+func (t *deviceTracker) onDeviceChanged(device *winaudio.Device, id string) {
+	name, err := device.Name()
+	matched := err == nil && strings.Contains(strings.ToUpper(name), t.match)
+	t.active.Store(matched)
+
+	if !t.first {
+		if matched {
+			t.app.log.Info("playback device changed: volume keys drive the monitor", "device", name)
+		} else {
+			t.app.log.Info("playback device changed: volume keys handed back to Windows", "device", name)
+		}
+	}
+
+	if matched && t.app.cfg.VolumeKeys.PinWindows {
+		if before, err := device.PinToMax(); err == nil && before < 0.999 {
+			t.app.log.Info("windows endpoint pinned to 100%", "was", percent(before))
+		}
+	}
+
+	t.lastID, t.matched, t.first, t.since = id, matched, false, 0
+}
+
+func percent(v float32) string { return fmt.Sprintf("%.0f%%", v*100) }
 
 // singleInstance takes a named mutex for the lifetime of the process.
 func singleInstance(name string) (release func(), err error) {
@@ -504,8 +573,8 @@ func singleInstance(name string) (release func(), err error) {
 		return nil, fmt.Errorf("CreateMutex: %w", lastErr)
 	}
 	if errno, ok := lastErr.(syscall.Errno); ok && errno == _errorAlreadyExists {
-		_closeHandleFn.Call(handle)
+		_closeHandle.Call(handle)
 		return nil, ErrAlreadyRunning
 	}
-	return func() { _closeHandleFn.Call(handle) }, nil
+	return func() { _closeHandle.Call(handle) }, nil
 }

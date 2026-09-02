@@ -289,7 +289,7 @@ func (a *App) Config(args []string) error {
 		return nil
 
 	case "show":
-		a.println(config.Template)
+		a.printf("%s", config.Template)
 		return nil
 
 	case "path":
