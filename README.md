@@ -1,154 +1,219 @@
 # lginput
 
-Monitor control for the **LG UltraGear 45GX950A** on Windows — including input
-switching, which no other Windows tool can do on this panel.
+DDC/CI monitor control for Windows — including **input switching on LG panels
+that no other Windows tool can switch**.
 
-Single static `.exe`, no dependencies, no runtime, no installer.
+Single static `.exe`. One dependency (a YAML parser). No installer, no admin
+rights, no runtime.
 
 ## The problem
 
-This monitor advertises the standard DDC/CI input-source register (VCP `0x60`)
-in its capabilities string, then silently discards every write to it:
+Some monitors advertise the standard DDC/CI input-source register, VCP `0x60`,
+and then silently discard every write to it:
 
 ```
-caps: ... vcp(... 60(11 12 0F 10 ) ...)      <- claims to support it
-SetVCPFeature(0x60, 17) -> ok=True            <- write accepted
-0x60 reads 15, 15, 15, 15, 15                 <- nothing happened
+caps: ... vcp(... 60(11 12 0F 10 ) ...)     <- claims to support it
+SetVCPFeature(0x60, 17) -> ok=True           <- write accepted
+0x60 reads 15, 15, 15, 15, 15                <- nothing happened
 ```
 
-It isn't a permissions problem, a conflicting app, or a bad cable — writes to
-`0x10` (brightness) and `0x62` (volume) land fine from the same process,
-unelevated, seconds apart.
+That is not a permissions problem, a conflicting app or a bad cable. On the LG
+UltraGear 45GX950A this was measured directly: writes to `0x10` (brightness)
+and `0x62` (volume) land from the same process, unelevated, seconds apart. Only
+`0x60` is ignored — and it *misreports* too, reading `15` (DisplayPort) while
+the live input is USB-C.
 
-LG moved input selection onto a service sidechannel: proprietary VCP **`0xF4`**,
-sent with the DDC **source address `0x50`** ("DDC2AB") instead of the standard
+LG moved input selection to a service sidechannel: proprietary VCP **`0xF4`**,
+sent with the DDC **source address `0x50`** ("DDC2AB") rather than the standard
 `0x51`. Windows' `dxva2.dll` hardcodes `0x51` with no override, which is why
-Twinkle Tray, ControlMyMonitor and everything else fail here — they all issue
-the same `SetVCPFeature` call.
+Twinkle Tray, ControlMyMonitor and every other conventional tool fail here —
+they all issue the same `SetVCPFeature` call.
 
-`lginput` bypasses that using NVIDIA's `NvAPI_I2CWrite`, which puts raw bytes
-on the physical I2C bus with no OS-level DDC/CI wrapping, so the packet can be
-built by hand with the right source address.
+`lginput` builds the packet by hand and puts it on the bus with NVIDIA's
+`NvAPI_I2CWrite`, which does no OS-level DDC wrapping:
 
 ```
 [source_addr, 0x84, 0x03, vcp_code, value_hi, value_lo, checksum]
- ^^^^^^^^^^^                                            checksum = 0x6E XOR all
+ ^^^^^^^^^^^                              checksum = 0x6E XOR every byte above
+ the field Windows will not let you set
 ```
-
-| Input | Value | Packet |
-|---|---|---|
-| HDMI 1 | `0x90` | `50 84 03 F4 00 90 DD` |
-| HDMI 2 | `0x91` | `50 84 03 F4 00 91 DC` |
-| DisplayPort | `0xD0` | `50 84 03 F4 00 D0 9D` |
-| USB-C | `0xD1` | `50 84 03 F4 00 D1 9C` |
 
 ## Requirements
 
 - Windows 10/11 x64
-- **An NVIDIA GPU driving the monitor** — required for `input` only. Everything
-  else uses the standard API and works on any GPU.
-- No admin rights needed.
+- **An NVIDIA GPU driving the monitor** — for `input` only. Everything else
+  uses the standard API and works on any GPU.
+- No admin rights.
+
+## Install
+
+```bash
+go build -o lginput.exe ./cmd/lginput
+```
+
+Go 1.25+. For a daemon with no console window:
+
+```bash
+go build -ldflags -H=windowsgui -o lginputw.exe ./cmd/lginput
+```
+
+## Quick start
+
+```bash
+lginput config init      # write a documented config
+lginput probe            # see what your monitor exposes
+lginput input usb-c      # switch
+```
 
 ## Commands
 
-```
-lginput [flags] <command> [args]
+**Daemons**
 
-list                    enumerate monitors and show key register values
-caps                    dump the raw DDC capabilities string
-probe                   read every interesting register
-get <vcp>               read one VCP code             (get 0x10)
-set <vcp> <value>       write one VCP code, verified  (set 0x62 30)
-brightness [v|+v|-v]    brightness (0x10)
-volume     [v|+v|-v]    volume     (0x62)
-mute | unmute           audio mute (0x8D)
-input <target>          hdmi1 | hdmi2 | dp | usb-c    (0xF4 @ 0x50, via NVAPI)
-pbp <off|50|66>         picture-by-picture (0xD7 @ 0x51)
-power <on|off>          DPMS (0xD6)
-raw <vcp> <value>       hand-built packet over NVAPI raw I2C
-watch                   apply a profile when a dock connects/disconnects
-volumekeys              volume keys drive the monitor instead of Windows
-devices [substr]        list present device IDs
-```
+| | |
+|---|---|
+| `watch` | Apply a profile when a dock appears or disappears |
+| `volumekeys` | Volume keys drive the monitor's own volume |
 
-Useful flags: `-n` dry run, `-v` verbose, `-fast` (see below), `-log <file>`.
+**Control**
+
+| | |
+|---|---|
+| `input <target>` | Switch input source |
+| `volume [v\|+v\|-v]` | Monitor volume |
+| `brightness [v\|+v\|-v]` | Monitor brightness |
+| `mute` / `unmute` | Monitor audio mute |
+| `pbp <mode>` | Picture-by-picture |
+| `power <on\|off>` | Monitor power |
+
+**Diagnostics**
+
+| | |
+|---|---|
+| `probe` | Every configured register, plus the capabilities string |
+| `get <vcp>` / `set <vcp> <value>` | Read / write any register, verified |
+| `raw <vcp> <value> [source]` | Hand-built packet over raw I2C, bypassing the Windows DDC layer |
+| `devices [substr]` | Present device IDs, for finding `watch` match strings |
+
+Flags: `-config`, `-m`, `-n` (dry run), `-v`, `-fast`, `-log`, `-log-level`.
 
 ### `volumekeys`
 
 Makes Windows behave like macOS: the Windows endpoint is pinned at 100% and the
-volume keys drive the monitor's own hardware volume. Useful when two machines
-share the panel, because `0x62` is then the single, machine-independent volume
-control.
+volume keys drive the monitor's hardware volume instead. Useful when two
+machines share a panel, because the monitor's own volume register is then the
+single, machine-independent control.
 
-```bash
-lginput -step 1 volumekeys
-```
-
-Only active while the monitor is the default playback device — on headphones or
-laptop speakers the keys pass straight through to Windows, with the native
-flyout and normal per-endpoint volume. Match with `-audio-match`.
+It is active **only while the monitor is the default playback device**. On
+headphones the keys pass straight through to Windows with the native flyout and
+normal per-endpoint volume. Windows tracks volume per device, so pinning the
+monitor's endpoint never touches your headphones' level.
 
 ### `watch`
 
-Watches for a dock and applies an input profile per machine:
-
 ```bash
-lginput -undock-input dp watch
+lginput watch
 ```
 
-Find a `-match` string for your own dock with `lginput devices <substr>`.
+The two directions are deliberately asymmetric. On connect it grabs the panel.
+On disconnect the dock is on its way to another machine, so it pushes the panel
+to that machine's input *before* it arrives.
+
+That asymmetry is load-bearing: **a monitor will not abandon a live signal just
+because a new one appears**, so the panel's own "auto input switch" setting
+cannot perform this handover while the first machine is still driving it.
+Pushing early works because a panel will happily sit on an input that has no
+signal yet.
+
+## Configuration
+
+`lginput config init` writes a commented file to
+`%APPDATA%\lginput\config.yaml`. Everything hardware-specific lives there, so
+adapting to a different monitor is an edit, not a recompile.
+
+The section that matters:
+
+```yaml
+inputs:
+  vcp: 0xF4          # 0x60 on most monitors; 0xF4 on recent LG
+  source_addr: 0x50  # 0x51 on most monitors; 0x50 for the LG sidechannel
+  targets:
+    hdmi1: 0x90
+    hdmi2: 0x91
+    dp: 0xD0
+    usb-c: 0xD1
+```
+
+**Adapting to another monitor:** run `probe` to see which registers respond,
+try `set 0x60 17` to check whether the standard path works, and if it does not,
+consult the [ddcutil LG value table][ddcutil] for your model. `raw` lets you
+try a code and source address without editing anything.
+
+A partial config overlays onto the defaults, so you only write what differs.
+Note that maps *merge* rather than replace: adding one entry to
+`inputs.targets` keeps the built-in ones alongside it.
 
 ## Known issues and caveats
 
-- **Tested on exactly one monitor**, a 45GX950A (`GSM 9E9F`, DDC model `WK95U`).
-  The `0xF4` values come from the ddcutil wiki's LG table and should apply to
-  other recent LG models, but nothing here is verified beyond this panel.
+- **Verified on exactly one monitor**, an LG 45GX950A (`GSM 9E9F`, DDC model
+  `WK95U`). The `0xF4` values come from the ddcutil wiki's LG table and should
+  apply to other recent LG models, but nothing here is verified beyond this
+  panel.
 - **The sidechannel never acknowledges.** `input` reports how many bus writes
-  were accepted, which is not the same as the monitor obeying. The only real
-  confirmation is the screen changing. `0x60` also *misreports* — it reads
-  `15` (DisplayPort) while the live input is USB-C — so it cannot be used to
-  verify either.
+  the hardware accepted, which is not the same as the monitor obeying. The only
+  real confirmation is the screen changing, and `0x60` cannot be used to verify
+  because it misreports.
 - **`-fast` needs per-machine verification.** By default `input` sweeps every
-  display mask and port because there is no way to discover which pair is the
-  right one. `-fast` sends only the per-output-bit writes: ~140ms instead of
-  ~1500ms. On the development machine the *combined* mask write is always
-  rejected and only the per-bit writes land, but confirm on yours before
+  display mask and port, because there is no way to discover which pair
+  addresses the monitor. `-fast` sends only the per-output-bit writes: ~140ms
+  instead of ~1500ms. On the development machine the *combined* mask write is
+  always rejected and only per-bit writes land, but confirm on yours before
   relying on it.
-- **The panel's DDC engine wedges.** After certain writes it stops answering
+- **The panel's DDC engine can wedge.** After certain writes it stops answering
   and every read fails with `ERROR_GRAPHICS_I2C_ERROR_RECEIVING_DATA`. It
-  recovers on a monitor power cycle. The NVAPI path keeps working throughout,
-  since it never touches the Windows DDC layer — so `input` still works when
-  `volume` and `brightness` do not.
-- **`power off` is one-way.** Once off, the panel stops answering DDC, so
+  recovers on a monitor power cycle. The raw I2C path keeps working throughout
+  since it never touches the Windows DDC layer, so `input` and `raw` still work
+  when `volume` and `brightness` do not.
+- **`power off` is one-way.** Once off the panel stops answering DDC, so
   `power on` will usually fail; wake it with a signal or the joystick.
-- **`go vet` reports 4 `possible misuse of unsafe.Pointer`.** These are
-  inherent to COM vtable dispatch and Win32 hook callbacks, where the pointers
-  are OS-owned native memory the Go GC never manages.
-- `probe` takes ~2s, dominated by the capabilities string read. It is a
-  diagnostic, not a hot path.
+- **`go vet` reports `possible misuse of unsafe.Pointer`.** Inherent to COM
+  vtable dispatch and Win32 hook callbacks, where the pointers reference
+  OS-owned memory the Go garbage collector never manages. Excluded in
+  `.golangci.yml` with that reasoning rather than silently.
 
-## Build
+## Layout
 
-```bash
-go build -o lginput.exe .
+```
+cmd/lginput/     entry point
+config/          YAML schema, defaults, loader
+vcp/             protocol primitives (Code, Level, SourceAddr)
+ddc/             standard DDC/CI over dxva2.dll
+nvapi/           raw I2C over NvAPI_I2CWrite
+winaudio/        Core Audio endpoint control
+internal/app/    commands, watcher, volume keys
 ```
 
-Go 1.25+. No module dependencies.
+`ddc`, `nvapi`, `winaudio` and `vcp` are importable. If you are here for the
+sidechannel trick, `nvapi.BuildSetVCP` and `nvapi.Client.Write` are what you
+want.
 
-To run a daemon without a console window, build with:
+## Development
 
 ```bash
-go build -ldflags -H=windowsgui -o lginputw.exe .
+go test ./...
+golangci-lint run
 ```
 
-and use `-log` for output.
+Tests cover everything that runs without hardware: packet construction against
+byte sequences verified on a real panel, config loading and validation, level
+arithmetic, debouncing and the volume state machine.
 
 ## Credits
 
-The `0xF4` / `0x50` mechanism is documented in the
-[ddcutil wiki](https://github.com/rockowitz/ddcutil/wiki/Switching-input-source-on-LG-monitors),
-and [meer-cha/lg-input-switch](https://github.com/meer-cha/lg-input-switch)
-implements the same approach in Python.
+The `0xF4` / `0x50` mechanism is documented in the [ddcutil wiki][ddcutil], and
+[meer-cha/lg-input-switch][python] implements the same approach in Python.
+
+[ddcutil]: https://github.com/rockowitz/ddcutil/wiki/Switching-input-source-on-LG-monitors
+[python]: https://github.com/meer-cha/lg-input-switch
 
 ## Licence
 
