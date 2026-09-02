@@ -199,9 +199,28 @@ want.
 ## Development
 
 ```bash
-go test ./...
-golangci-lint run
+make help     # list targets
+make check    # fmt, vet, test -- run this before committing
+make lint     # golangci-lint, fetched on demand via go run
+make all      # console and windowless binaries
 ```
+
+The Makefile targets POSIX make rather than assuming GNU: the `make` on a
+Windows box is often BusyBox make, which silently ignores `$(shell ...)`
+instead of reporting it. Nothing here depends on command substitution — the
+binary derives its own version from Go's embedded VCS build info, so
+`go build` alone produces an identifiable binary:
+
+```
+$ lginput version
+lginput v0.0.0-20260902224239-ba387ed2ce87+dirty (windows/amd64, go1.27.1)
+```
+
+Stamp a release with `make build VERSION=v1.2.3`.
+
+`make vet` passes `-unsafeptr=false`, matching the exclusion in
+`.golangci.yml`, so the deliberate COM and Win32 hook conversions do not fail
+the build.
 
 Tests cover everything that runs without hardware: packet construction against
 byte sequences verified on a real panel, config loading and validation, level

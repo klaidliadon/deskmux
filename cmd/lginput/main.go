@@ -12,11 +12,59 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime"
+	"runtime/debug"
 	"syscall"
 
 	"github.com/klaidliadon/lginput/config"
 	"github.com/klaidliadon/lginput/internal/app"
 )
+
+// version may be stamped at build time with
+// -ldflags "-X main.version=v1.2.3", which is what a tagged release should
+// do. When it is not, buildVersion falls back to the VCS revision Go embeds
+// automatically, so a plain `go build` still produces an identifiable binary.
+var version string
+
+// buildVersion reports the most specific version available.
+//
+// Deriving this in Go rather than in the Makefile is deliberate: `make` is not
+// always GNU make -- BusyBox make, for one, silently ignores $(shell ...) and
+// would stamp an empty string without complaining.
+func buildVersion() string {
+	if version != "" {
+		return version
+	}
+
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+
+	// Set when installed with `go install module@version`.
+	if v := info.Main.Version; v != "" && v != "(devel)" {
+		return v
+	}
+
+	var revision, suffix string
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			revision = setting.Value
+		case "vcs.modified":
+			if setting.Value == "true" {
+				suffix = "-dirty"
+			}
+		}
+	}
+	if revision == "" {
+		return "devel"
+	}
+	if len(revision) > 12 {
+		revision = revision[:12]
+	}
+	return revision + suffix
+}
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -51,6 +99,14 @@ func run(argv []string) error {
 	args := fs.Args()
 	if len(args) == 0 {
 		return app.ErrUsage
+	}
+
+	// Answered before loading configuration: `version` must work even when
+	// the config file is missing or malformed.
+	if args[0] == "version" {
+		fmt.Printf("lginput %s (%s/%s, %s)\n",
+			buildVersion(), runtime.GOOS, runtime.GOARCH, runtime.Version())
+		return nil
 	}
 
 	cfg, usedPath, err := config.Load(*configPath)
@@ -155,6 +211,7 @@ configuration:
   config init [path]      write a documented starter config
   config show             print the starter config to stdout
   config path             show where configuration is searched for
+  version                 print the version and toolchain
 
 flags (must precede the command):
   -config file    configuration file
