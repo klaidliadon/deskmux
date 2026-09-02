@@ -1,0 +1,8 @@
+# Normalise to LF in the repository; Git checks out native line endings.
+* text=auto eol=lf
+
+# Go tooling formats with LF and gofmt would otherwise fight checkout.
+*.go text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf

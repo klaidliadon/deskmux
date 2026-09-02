@@ -1,0 +1,63 @@
+version: "2"
+
+run:
+  timeout: 3m
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - bodyclose
+    - errorlint
+    - misspell
+    - revive
+    - unconvert
+    - unparam
+    - nakedret
+    - prealloc
+
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        # This codebase calls Win32 and COM by hand. Converting uintptr to
+        # unsafe.Pointer is unavoidable when dispatching through a COM vtable
+        # or reading a KBDLLHOOKSTRUCT out of an LPARAM. The pointers involved
+        # reference OS-owned native memory that Go's garbage collector neither
+        # moves nor reclaims, so the pattern is sound here even though the
+        # check cannot prove it.
+        - unsafeptr
+        - fieldalignment
+
+    revive:
+      rules:
+        - name: exported
+        - name: indent-error-flow
+        - name: var-naming
+          arguments:
+            - []
+            - []
+            # Package-level identifiers are prefixed with _ per the Uber Go
+            # style guide, which var-naming would otherwise flag.
+            - - upperCaseConst: true
+
+  exclusions:
+    rules:
+      # Syscall wrappers legitimately ignore return values from calls whose
+      # only failure mode is "the handle was already gone".
+      - path: (winaudio|internal/app)/.*\.go
+        linters:
+          - errcheck
+        text: "Call$"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/klaidliadon/lginput
