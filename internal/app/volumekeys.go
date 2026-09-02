@@ -162,36 +162,54 @@ func (a *App) VolumeKeys(ctx context.Context) error {
 		runKeyboardHook(ctx, state, &active, cfg.Step, maxLevel, hookErr, threadID)
 	}()
 
-	var tid uint32
-	select {
-	case tid = <-threadID:
-	case err := <-hookErr:
+	// The hook thread parks in GetMessage, which only returns when a message
+	// arrives, so shutdown must post WM_QUIT to it. Every exit path below
+	// therefore runs through stopHook: taking ctx.Done() here without waking
+	// the thread would leave it blocked forever and hang wg.Wait().
+	var (
+		tid     uint32
+		haveTID bool
+		runErr  error
+	)
+
+	stopHook := func() {
+		if !haveTID {
+			// The hook may have started between the select and here.
+			select {
+			case tid = <-threadID:
+				haveTID = true
+			default:
+			}
+		}
+		if haveTID {
+			_postThreadMsg.Call(uintptr(tid), _wmQuit, 0, 0)
+		}
 		cancel()
 		wg.Wait()
-		return err
-	case <-ctx.Done():
-		cancel()
-		wg.Wait()
-		return nil
 	}
 
-	a.log.Info("listening for volume keys")
-
 	select {
-	case <-ctx.Done():
+	case tid = <-threadID:
+		haveTID = true
 	case err := <-hookErr:
-		if err != nil {
-			a.log.Error("keyboard hook ended", "err", err)
+		runErr = err
+	case <-ctx.Done():
+	}
+
+	if runErr == nil && haveTID {
+		a.log.Info("listening for volume keys")
+		select {
+		case <-ctx.Done():
+		case err := <-hookErr:
+			if err != nil {
+				a.log.Error("keyboard hook ended", "err", err)
+			}
 		}
 	}
 
-	// GetMessage blocks, so the hook thread needs a message to wake it.
-	_postThreadMsg.Call(uintptr(tid), _wmQuit, 0, 0)
-	cancel()
-	wg.Wait()
-
+	stopHook()
 	a.log.Info("volume keys released")
-	return nil
+	return runErr
 }
 
 // runKeyboardHook owns the hook and its message loop, and must stay on one OS

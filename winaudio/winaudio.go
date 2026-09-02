@@ -114,9 +114,20 @@ func failed(hr uintptr) bool { return int32(hr) < 0 }
 
 // InitCOM initialises COM on the calling thread and returns the teardown.
 // The caller must already hold the thread via runtime.LockOSThread.
+//
+// CoUninitialize must balance a *successful* CoInitializeEx and nothing else.
+// When the thread is already in a different apartment the call returns
+// RPC_E_CHANGED_MODE, having taken no reference: uninitialising then would
+// decrement a reference this package never took, tearing COM down under
+// whoever did initialise the thread. The returned teardown is a no-op in that
+// case.
 func InitCOM() (func(), error) {
 	hr, _, _ := _coInitializeEx.Call(0, _apartmentMode)
-	if failed(hr) && uint32(hr) != _rpcChangedMode {
+
+	if uint32(hr) == _rpcChangedMode {
+		return func() {}, nil
+	}
+	if failed(hr) {
 		return nil, fmt.Errorf("CoInitializeEx: 0x%08X", uint32(hr))
 	}
 	return func() { _coUninitialize.Call() }, nil
