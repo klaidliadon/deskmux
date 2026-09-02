@@ -12,6 +12,7 @@ import (
 
 	"github.com/klaidliadon/lginput/config"
 	"github.com/klaidliadon/lginput/ddc"
+	"github.com/klaidliadon/lginput/vcp"
 )
 
 // Probe reads every register this tool knows about and dumps the capabilities
@@ -32,7 +33,7 @@ func (a *App) Probe() error {
 
 	r := a.cfg.Registers
 	codes := []struct {
-		code byte
+		code vcp.Code
 		name string
 	}{
 		{r.Brightness, "brightness"},
@@ -122,7 +123,7 @@ func (a *App) Set(args []string) error {
 }
 
 // Level gets or sets a 0..max register such as brightness or volume.
-func (a *App) Level(args []string, code byte, label string) error {
+func (a *App) Level(args []string, code vcp.Code, label string) error {
 	set, m, err := a.openMonitor()
 	if err != nil {
 		return err
@@ -155,7 +156,7 @@ func (a *App) Level(args []string, code byte, label string) error {
 	return nil
 }
 
-func resolveLevel(arg string, cur ddc.Value) (uint32, error) {
+func resolveLevel(arg string, cur ddc.Reading) (vcp.Level, error) {
 	relative := strings.HasPrefix(arg, "+") || strings.HasPrefix(arg, "-")
 
 	n, err := strconv.ParseInt(arg, 10, 32)
@@ -167,11 +168,11 @@ func resolveLevel(arg string, cur ddc.Value) (uint32, error) {
 	if relative {
 		v = int64(cur.Current) + n
 	}
-	return uint32(min(max(v, 0), int64(cur.Max))), nil
+	return vcp.Level(min(max(v, 0), int64(cur.Max))), nil
 }
 
 // Mute writes the mute register. 1 mutes, 2 unmutes, per MCCS.
-func (a *App) Mute(value uint32) error {
+func (a *App) Mute(value vcp.Level) error {
 	set, m, err := a.openMonitor()
 	if err != nil {
 		return err
@@ -226,7 +227,7 @@ func (a *App) Table(args []string, t config.Table, label string) error {
 
 	if set, m, err := a.openMonitor(); err == nil {
 		defer set.Close()
-		if err := m.SetVCP(t.VCP, uint32(mode)); err == nil {
+		if err := m.SetVCP(t.VCP, mode); err == nil {
 			a.println("  sent via DDC")
 
 			time.Sleep(a.cfg.DDC.Settle.D())
@@ -241,10 +242,14 @@ func (a *App) Table(args []string, t config.Table, label string) error {
 
 // Raw sends a hand-built packet over NVAPI, the escape hatch for when the
 // Windows DDC layer will not answer at all.
+//
+// The source address is worth overriding by hand: it is the one field the
+// Windows API will not let you set, and the whole reason this tool exists.
 func (a *App) Raw(args []string) error {
-	if len(args) != 2 {
-		return errors.New("usage: raw <vcp> <value>")
+	if len(args) < 2 || len(args) > 3 {
+		return errors.New("usage: raw <vcp> <value> [source-addr]")
 	}
+
 	code, err := parseVCP(args[0])
 	if err != nil {
 		return err
@@ -253,7 +258,16 @@ func (a *App) Raw(args []string) error {
 	if err != nil {
 		return err
 	}
-	return a.sendRaw(a.cfg.PBP.SourceAddr, code, uint16(value), "raw")
+
+	source := a.cfg.DDC.SourceAddr
+	if len(args) == 3 {
+		n, err := strconv.ParseUint(args[2], 0, 8)
+		if err != nil {
+			return fmt.Errorf("bad source address %q: %w", args[2], err)
+		}
+		source = vcp.SourceAddr(n)
+	}
+	return a.sendRaw(source, code, value, "raw")
 }
 
 // Config manages the configuration file.

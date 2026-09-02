@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"github.com/klaidliadon/lginput/vcp"
 )
 
 var (
@@ -128,11 +130,11 @@ func (s *Set) Close() {
 	s.Monitors = nil
 }
 
-// Value is one reply from GetVCPFeatureAndVCPFeatureReply.
-type Value struct {
+// Reading is one reply from GetVCPFeatureAndVCPFeatureReply.
+type Reading struct {
 	Type    uint32 // 0 = momentary, 1 = set parameter
-	Current uint32
-	Max     uint32
+	Current vcp.Level
+	Max     vcp.Level
 }
 
 func retry(op func() error) error {
@@ -147,44 +149,56 @@ func retry(op func() error) error {
 }
 
 // GetVCP reads a VCP feature.
-func (m Monitor) GetVCP(code byte) (Value, error) {
-	var v Value
+//
+// The Windows API hands back DWORDs even though DDC/CI carries values as two
+// bytes, so the reply is read into uint32s and narrowed to vcp.Level.
+func (m Monitor) GetVCP(code vcp.Code) (Reading, error) {
+	var kind, current, maximum uint32
+
 	err := retry(func() error {
 		r, _, callErr := _getVCPFeature.Call(
 			uintptr(m.Handle),
 			uintptr(code),
-			uintptr(unsafe.Pointer(&v.Type)),
-			uintptr(unsafe.Pointer(&v.Current)),
-			uintptr(unsafe.Pointer(&v.Max)),
+			uintptr(unsafe.Pointer(&kind)),
+			uintptr(unsafe.Pointer(&current)),
+			uintptr(unsafe.Pointer(&maximum)),
 		)
 		if r == 0 {
-			return fmt.Errorf("GetVCPFeatureAndVCPFeatureReply(0x%02X): %w", code, callErr)
+			return fmt.Errorf("GetVCPFeatureAndVCPFeatureReply(%s): %w", code, callErr)
 		}
 		return nil
 	})
-	return v, err
+	if err != nil {
+		return Reading{}, err
+	}
+
+	return Reading{
+		Type:    kind,
+		Current: vcp.Level(current),
+		Max:     vcp.Level(maximum),
+	}, nil
 }
 
 // SetVCP writes a VCP feature, retrying transient bus errors.
 //
 // A nil error means the bytes were sent, not that the monitor obeyed.
-func (m Monitor) SetVCP(code byte, value uint32) error {
+func (m Monitor) SetVCP(code vcp.Code, value vcp.Level) error {
 	return retry(func() error { return m.SetVCPOnce(code, value) })
 }
 
 // SetVCPOnce writes without the retry ladder, for latency-sensitive callers
 // such as volume keys where a failed write is better superseded by the next
 // keystroke than retried for up to a second.
-func (m Monitor) SetVCPOnce(code byte, value uint32) error {
+func (m Monitor) SetVCPOnce(code vcp.Code, value vcp.Level) error {
 	r, _, err := _setVCPFeature.Call(uintptr(m.Handle), uintptr(code), uintptr(value))
 	if r == 0 {
-		return fmt.Errorf("SetVCPFeature(0x%02X, %d): %w", code, value, err)
+		return fmt.Errorf("SetVCPFeature(%s, %s): %w", code, value, err)
 	}
 	return nil
 }
 
 // SetVCPVerified writes, waits, reads back, and reports whether it stuck.
-func (m Monitor) SetVCPVerified(code byte, value uint32, settle time.Duration) (landed bool, readback uint32, err error) {
+func (m Monitor) SetVCPVerified(code vcp.Code, value vcp.Level, settle time.Duration) (landed bool, readback vcp.Level, err error) {
 	if err = m.SetVCP(code, value); err != nil {
 		return false, 0, err
 	}

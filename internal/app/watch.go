@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/klaidliadon/lginput/config"
+	"github.com/klaidliadon/lginput/vcp"
 )
 
 // Watch applies a profile when the configured dock appears or disappears.
@@ -86,7 +87,7 @@ func (a *App) Watch(ctx context.Context) error {
 // failures are logged and the next step still runs.
 func (a *App) applyProfile(p config.Profile, event string) {
 	if p.Volume >= 0 {
-		a.log.Info("profile volume", "event", event, "result", a.setVolume(uint32(p.Volume)))
+		a.log.Info("profile volume", "event", event, "result", a.setVolume(vcp.Level(p.Volume)))
 	}
 
 	if p.Input != "" {

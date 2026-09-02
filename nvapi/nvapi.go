@@ -20,11 +20,9 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
-)
 
-// DeviceAddr is the DDC/CI destination address (I2C 0x37 << 1). It is not
-// part of the packet body but is folded into the checksum.
-const DeviceAddr byte = 0x6E
+	"github.com/klaidliadon/lginput/vcp"
+)
 
 const (
 	_maxPhysicalGPUs = 64
@@ -177,9 +175,9 @@ func cString(b []byte) string {
 // 0x84 is the length byte (0x80 | 4 data bytes) and 0x03 the Set VCP opcode.
 // The destination address is not in the buffer but is folded into the
 // checksum.
-func BuildSetVCP(sourceAddr, vcpCode byte, value uint16) []byte {
-	pkt := []byte{sourceAddr, 0x84, 0x03, vcpCode, byte(value >> 8), byte(value)}
-	checksum := DeviceAddr
+func BuildSetVCP(source vcp.SourceAddr, code vcp.Code, value vcp.Level) []byte {
+	pkt := []byte{byte(source), 0x84, 0x03, byte(code), byte(value >> 8), byte(value)}
+	checksum := vcp.DeviceAddr
 	for _, b := range pkt {
 		checksum ^= b
 	}
@@ -229,7 +227,7 @@ func (c *Client) Write(pkt []byte, opts WriteOptions) []Attempt {
 		info := i2cInfo{
 			DisplayMask:   mask,
 			IsDDCPort:     1,
-			I2CDevAddress: DeviceAddr,
+			I2CDevAddress: vcp.DeviceAddr,
 			PbData:        uintptr(unsafe.Pointer(&pkt[0])),
 			CbSize:        uint32(len(pkt)),
 			I2CSpeed:      0xFFFF, // deprecated field; must be 0xFFFF for v2+

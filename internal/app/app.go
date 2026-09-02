@@ -18,6 +18,7 @@ import (
 	"github.com/klaidliadon/lginput/config"
 	"github.com/klaidliadon/lginput/ddc"
 	"github.com/klaidliadon/lginput/nvapi"
+	"github.com/klaidliadon/lginput/vcp"
 )
 
 // Options are per-invocation overrides that do not belong in the config file.
@@ -112,32 +113,32 @@ func (a *App) openMonitor() (*ddc.Set, ddc.Monitor, error) {
 	return set, set.Monitors[idx], nil
 }
 
-func parseVCP(s string) (byte, error) {
+func parseVCP(s string) (vcp.Code, error) {
 	n, err := strconv.ParseUint(s, 0, 8)
 	if err != nil {
 		return 0, fmt.Errorf("bad VCP code %q: %w", s, err)
 	}
-	return byte(n), nil
+	return vcp.Code(n), nil
 }
 
-func parseValue(s string) (uint32, error) {
-	n, err := strconv.ParseUint(s, 0, 32)
+func parseValue(s string) (vcp.Level, error) {
+	n, err := strconv.ParseUint(s, 0, 16)
 	if err != nil {
 		return 0, fmt.Errorf("bad value %q: %w", s, err)
 	}
-	return uint32(n), nil
+	return vcp.Level(n), nil
 }
 
 // sendRaw builds a DDC packet and pushes it over NVAPI raw I2C.
-func (a *App) sendRaw(src, vcp byte, value uint16, label string) error {
-	pkt := nvapi.BuildSetVCP(src, vcp, value)
+func (a *App) sendRaw(source vcp.SourceAddr, code vcp.Code, value vcp.Level, label string) error {
+	pkt := nvapi.BuildSetVCP(source, code, value)
 
 	hex := make([]string, 0, len(pkt))
 	for _, b := range pkt {
 		hex = append(hex, fmt.Sprintf("%02X", b))
 	}
-	a.printf("%s\n  packet: %s   (src=0x%02X vcp=0x%02X value=0x%04X)\n",
-		label, strings.Join(hex, " "), src, vcp, value)
+	a.printf("%s\n  packet: %s   (source=%s code=%s value=%s)\n",
+		label, strings.Join(hex, " "), source, code, value)
 
 	if a.opts.DryRun {
 		a.println("  dry-run: nothing sent")
@@ -182,7 +183,7 @@ func (a *App) sendRaw(src, vcp byte, value uint16, label string) error {
 // setVolume writes VCP volume, preferring the verifiable DDC path and falling
 // back to raw I2C when the Windows DDC layer is unavailable, which happens
 // routinely on panels whose DDC engine has wedged.
-func (a *App) setVolume(level uint32) string {
+func (a *App) setVolume(level vcp.Level) string {
 	if set, m, err := a.openMonitor(); err == nil {
 		defer set.Close()
 
@@ -200,7 +201,7 @@ func (a *App) setVolume(level uint32) string {
 		return fmt.Sprintf("DDC unavailable and NVAPI failed: %v", err)
 	}
 
-	pkt := nvapi.BuildSetVCP(a.cfg.PBP.SourceAddr, a.cfg.Registers.Volume, uint16(level))
+	pkt := nvapi.BuildSetVCP(a.cfg.DDC.SourceAddr, a.cfg.Registers.Volume, level)
 	attempts := client.Write(pkt, nvapi.WriteOptions{Fast: true, Delay: a.cfg.DDC.BusDelay.D()})
 
 	var accepted int

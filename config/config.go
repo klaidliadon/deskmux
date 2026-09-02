@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/klaidliadon/lginput/vcp"
 )
 
 // Duration wraps time.Duration so durations can be written as "250ms" in
@@ -57,15 +59,19 @@ type DDC struct {
 	// BusDelay is the pause between raw I2C writes. Going much below 40ms
 	// risks wedging panels with fragile DDC engines.
 	BusDelay Duration `yaml:"bus_delay"`
+
+	// SourceAddr is the DDC source address for ordinary writes. Only the
+	// input section normally departs from the standard 0x51.
+	SourceAddr vcp.SourceAddr `yaml:"source_addr"`
 }
 
 // Registers names the standard VCP codes this tool reads and writes.
 type Registers struct {
-	Brightness    byte `yaml:"brightness"`
-	Contrast      byte `yaml:"contrast"`
-	Volume        byte `yaml:"volume"`
-	Mute          byte `yaml:"mute"`
-	InputStandard byte `yaml:"input_standard"`
+	Brightness    vcp.Code `yaml:"brightness"`
+	Contrast      vcp.Code `yaml:"contrast"`
+	Volume        vcp.Code `yaml:"volume"`
+	Mute          vcp.Code `yaml:"mute"`
+	InputStandard vcp.Code `yaml:"input_standard"`
 }
 
 // Inputs describes how this monitor selects its input source.
@@ -74,17 +80,17 @@ type Registers struct {
 // recent LG panels 0x60 is advertised and then silently ignored, and the real
 // control is VCP 0xF4 at source address 0x50.
 type Inputs struct {
-	VCP        byte              `yaml:"vcp"`
-	SourceAddr byte              `yaml:"source_addr"`
-	Targets    map[string]uint16 `yaml:"targets"`
-	Aliases    map[string]string `yaml:"aliases"`
+	VCP        vcp.Code             `yaml:"vcp"`
+	SourceAddr vcp.SourceAddr       `yaml:"source_addr"`
+	Targets    map[string]vcp.Level `yaml:"targets"`
+	Aliases    map[string]string    `yaml:"aliases"`
 }
 
 // Table is a VCP register plus its named values.
 type Table struct {
-	VCP        byte              `yaml:"vcp"`
-	SourceAddr byte              `yaml:"source_addr"`
-	Modes      map[string]uint16 `yaml:"modes"`
+	VCP        vcp.Code             `yaml:"vcp"`
+	SourceAddr vcp.SourceAddr       `yaml:"source_addr"`
+	Modes      map[string]vcp.Level `yaml:"modes"`
 }
 
 // Profile is what to apply on a dock transition.
@@ -130,8 +136,9 @@ func Default() Config {
 	return Config{
 		Monitor: 0,
 		DDC: DDC{
-			Settle:   Duration(250 * time.Millisecond),
-			BusDelay: Duration(40 * time.Millisecond),
+			Settle:     Duration(250 * time.Millisecond),
+			BusDelay:   Duration(40 * time.Millisecond),
+			SourceAddr: vcp.Standard,
 		},
 		Registers: Registers{
 			Brightness:    0x10,
@@ -143,7 +150,7 @@ func Default() Config {
 		Inputs: Inputs{
 			VCP:        0xF4,
 			SourceAddr: 0x50,
-			Targets: map[string]uint16{
+			Targets: map[string]vcp.Level{
 				"hdmi1": 0x90,
 				"hdmi2": 0x91,
 				"dp":    0xD0,
@@ -157,12 +164,12 @@ func Default() Config {
 		PBP: Table{
 			VCP:        0xD7,
 			SourceAddr: 0x51,
-			Modes:      map[string]uint16{"off": 0x01, "50": 0x05, "66": 0x03},
+			Modes:      map[string]vcp.Level{"off": 0x01, "50": 0x05, "66": 0x03},
 		},
 		Power: Table{
 			VCP:        0xD6,
 			SourceAddr: 0x51,
-			Modes:      map[string]uint16{"on": 0x01, "off": 0x04},
+			Modes:      map[string]vcp.Level{"on": 0x01, "off": 0x04},
 		},
 		Watch: Watch{
 			Match:    []string{"VID_1E91", "VEN_OWC_TB3", "SUBSYS_00191C7A"},
@@ -272,7 +279,7 @@ func (c Config) Validate() error {
 
 // ResolveInput maps a user-supplied input name, following aliases, to its
 // VCP value.
-func (c Config) ResolveInput(name string) (uint16, error) {
+func (c Config) ResolveInput(name string) (vcp.Level, error) {
 	if alias, ok := c.Inputs.Aliases[name]; ok {
 		name = alias
 	}

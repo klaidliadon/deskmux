@@ -13,6 +13,7 @@ import (
 	"unsafe"
 
 	"github.com/klaidliadon/lginput/ddc"
+	"github.com/klaidliadon/lginput/vcp"
 	"github.com/klaidliadon/lginput/winaudio"
 )
 
@@ -305,7 +306,7 @@ func (a *App) runVolumeWriter(ctx context.Context, state *volumeState, maxLevel 
 
 	// write reopens the handle once if it has gone stale, which happens when
 	// the panel's DDC engine drops out and comes back.
-	write := func(code byte, value uint32) error {
+	write := func(code vcp.Code, value vcp.Level) error {
 		if set == nil {
 			if err := open(); err != nil {
 				return err
@@ -358,7 +359,7 @@ func (a *App) runVolumeWriter(ctx context.Context, state *volumeState, maxLevel 
 		state.mu.Unlock()
 
 		if muteReq {
-			value := uint32(2) // 1 mutes, 2 unmutes
+			value := vcp.Level(2) // 1 mutes, 2 unmutes
 			if muted {
 				value = 1
 			}
@@ -370,7 +371,7 @@ func (a *App) runVolumeWriter(ctx context.Context, state *volumeState, maxLevel 
 		}
 
 		if dirty {
-			if err := write(a.cfg.Registers.Volume, uint32(target)); err != nil {
+			if err := write(a.cfg.Registers.Volume, vcp.Level(target)); err != nil {
 				a.log.Warn("volume write failed", "level", target, "err", err)
 			} else {
 				a.log.Debug("volume", "level", target)
