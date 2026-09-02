@@ -172,6 +172,13 @@ func (a *App) sendRaw(source vcp.SourceAddr, code vcp.Code, value vcp.Level, lab
 		}
 	}
 
+	// Also log it: when a daemon calls this its stdout goes nowhere, and how
+	// many writes the bus took is the only evidence available for a channel
+	// that never acknowledges.
+	a.log.Debug("i2c write",
+		"label", label, "source", source, "code", code, "value", value,
+		"accepted", accepted, "attempts", len(attempts))
+
 	a.printf("  %d/%d writes accepted by the bus\n", accepted, len(attempts))
 	if accepted == 0 {
 		return errors.New("every I2C write was rejected; is the monitor on the NVIDIA GPU?")
