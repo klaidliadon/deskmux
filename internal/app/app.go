@@ -85,6 +85,8 @@ func (a *App) Run(ctx context.Context, cmd string, args []string) error {
 		return a.Devices(args)
 	case "config":
 		return a.Config(args)
+	case "service":
+		return a.Service(args)
 	default:
 		return fmt.Errorf("unknown command %q", cmd)
 	}

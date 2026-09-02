@@ -34,6 +34,7 @@ BIN_GUI := $(BINARY)w$(EXE)
 
 .DEFAULT_GOAL := build
 .PHONY: build gui all test cover bench lint fmt vet tidy check clean install \
+        service service-install service-uninstall service-status \
         watch volumekeys probe config version help
 
 ## build: compile the console binary
@@ -93,6 +94,26 @@ check: fmt vet test
 ## install: install into GOBIN
 install:
 	go install -ldflags "$(STAMP)" $(PKG)
+
+## service: register the daemons to start at logon
+##
+## Windows scheduled tasks, not Windows services. volumekeys installs a
+## low-level keyboard hook and those are per-session -- a service runs in
+## session 0 and would never see a keystroke. A logon task runs as you, in
+## your session, which is what both daemons need.
+service: service-install
+
+## service-install: create the logon tasks
+service-install: build
+	./$(BIN) service install
+
+## service-uninstall: remove the logon tasks
+service-uninstall: build
+	./$(BIN) service uninstall
+
+## service-status: report whether the logon tasks exist
+service-status: build
+	./$(BIN) service status
 
 ## clean: remove build output
 clean:

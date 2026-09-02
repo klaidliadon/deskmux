@@ -152,14 +152,9 @@ func (a *App) VolumeKeys(ctx context.Context) error {
 		return fmt.Errorf("volume_keys.step must be positive, got %d", cfg.Step)
 	}
 
-	set, m, err := a.openMonitor()
+	current, err := a.awaitVolumeReading(ctx)
 	if err != nil {
-		return fmt.Errorf("reach the monitor over DDC: %w", err)
-	}
-	current, err := m.GetVCP(a.cfg.Registers.Volume)
-	set.Close()
-	if err != nil {
-		return fmt.Errorf("read volume register: %w", err)
+		return err
 	}
 
 	maxLevel := int(current.Max)
@@ -227,6 +222,53 @@ func (a *App) VolumeKeys(ctx context.Context) error {
 
 	a.log.Info("volume keys released")
 	return runErr
+}
+
+// awaitVolumeReading blocks until the monitor answers, or ctx is cancelled.
+//
+// A daemon started at logon routinely finds the monitor asleep, showing
+// another input, or with its DDC engine wedged -- a state some panels enter
+// after certain writes and leave only on a power cycle. Exiting then would
+// mean the daemon is permanently gone by the time the display is usable, so
+// it waits instead. Nothing is hooked until the monitor can actually be
+// driven, which is the honest behaviour: without DDC there is nothing the
+// volume keys could do.
+func (a *App) awaitVolumeReading(ctx context.Context) (ddc.Reading, error) {
+	const (
+		firstDelay = 2 * time.Second
+		maxDelay   = 30 * time.Second
+	)
+
+	delay := firstDelay
+	for attempt := 1; ; attempt++ {
+		set, monitor, err := a.openMonitor()
+		if err == nil {
+			reading, readErr := monitor.GetVCP(a.cfg.Registers.Volume)
+			set.Close()
+			if readErr == nil {
+				if attempt > 1 {
+					a.log.Info("monitor is answering again", "attempts", attempt)
+				}
+				return reading, nil
+			}
+			err = readErr
+		}
+
+		// Log the first failure plainly and the rest at debug, so a monitor
+		// that is simply off overnight does not fill the log.
+		if attempt == 1 {
+			a.log.Warn("monitor not reachable, waiting", "err", err, "retry_in", delay)
+		} else {
+			a.log.Debug("monitor still not reachable", "attempt", attempt, "err", err)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ddc.Reading{}, ctx.Err()
+		case <-time.After(delay):
+		}
+		delay = min(delay*2, maxDelay)
+	}
 }
 
 // keyHook owns the low-level keyboard hook and the message loop that keeps it

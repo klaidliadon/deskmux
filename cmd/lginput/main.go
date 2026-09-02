@@ -213,6 +213,11 @@ configuration:
   config path             show where configuration is searched for
   version                 print the version and toolchain
 
+service (Windows scheduled tasks, run at logon as you):
+  service install         register watch and volumekeys to start at logon
+  service uninstall       remove them
+  service status          report whether they are installed
+
 flags (must precede the command):
   -config file    configuration file
   -m N            monitor index, overriding the config
