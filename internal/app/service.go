@@ -10,28 +10,39 @@ import (
 	"syscall"
 )
 
-// Windows scheduled tasks, not Windows services.
+// Autostart is a per-user Run entry, not a Windows service and not a
+// scheduled task.
 //
-// volumekeys installs a low-level keyboard hook, and those are per-session:
-// a service runs in session 0 and cannot hook the interactive desktop, so it
-// would start cleanly and then never see a keystroke. watch has the same
-// problem in reverse -- monitor enumeration wants a window station. A task
-// triggered at logon runs as the user, inside their session, which is what
-// both daemons actually need.
+// A service is wrong outright: volumekeys installs a low-level keyboard hook
+// and those are per-session, so a service in session 0 would start cleanly
+// and never see a keystroke.
+//
+// A logon scheduled task looks right and is what this originally used, but
+// schtasks refuses to create an ONLOGON trigger without elevation -- with or
+// without an explicit /ru, and in a subfolder or not. Requiring an
+// administrator prompt to arrange something that runs unprivileged in the
+// user's own session is a poor trade.
+//
+// The Run key needs no privileges, starts the process inside the user's
+// session where the hook and DDC both work, and is removed as easily as it is
+// added. What it gives up is restart-on-failure, which matters less now that
+// the daemons wait for the monitor rather than exiting when it is absent.
+const _runKey = `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+
 const (
-	_taskWatch      = "deskmux watch"
-	_taskVolumeKeys = "deskmux volumekeys"
+	_entryWatch      = "deskmux watch"
+	_entryVolumeKeys = "deskmux volumekeys"
 )
 
-var _tasks = []struct {
+var _entries = []struct {
 	name    string
 	command string
 }{
-	{_taskWatch, "watch"},
-	{_taskVolumeKeys, "volumekeys"},
+	{_entryWatch, "watch"},
+	{_entryVolumeKeys, "volumekeys"},
 }
 
-// Service manages the logon tasks that run the daemons.
+// Service manages the autostart entries that run the daemons at logon.
 func (a *App) Service(args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: service <install|uninstall|status>")
@@ -55,18 +66,16 @@ func (a *App) serviceInstall() error {
 		return err
 	}
 
-	for _, task := range _tasks {
-		// Quote the executable so a path with spaces survives, and let each
-		// task write to its own log since a task has no console.
-		action := fmt.Sprintf(`"%s" -log "%s" %s`, exe, a.taskLogPath(task.command), task.command)
+	for _, entry := range _entries {
+		// Quote the executable so a path with spaces survives, and give each
+		// daemon its own log since neither has a console to write to.
+		command := fmt.Sprintf(`"%s" -log "%s" %s`, exe, a.logPath(entry.command), entry.command)
 
-		line := buildCommandLine("schtasks",
-			"/create",
-			"/tn", task.name,
-			"/tr", action,
-			"/sc", "onlogon",
-			"/rl", "limited", // no elevation: DDC and the hook do not need it
-			"/f", // replace an existing task of the same name
+		line := buildCommandLine("reg", "add", _runKey,
+			"/v", entry.name,
+			"/t", "REG_SZ",
+			"/d", command,
+			"/f",
 		)
 
 		if a.opts.DryRun {
@@ -74,72 +83,72 @@ func (a *App) serviceInstall() error {
 			continue
 		}
 		if err := runCommandLine(line); err != nil {
-			return fmt.Errorf("create task %q: %w", task.name, err)
+			return fmt.Errorf("register %q: %w", entry.name, err)
 		}
-		a.printf("installed %q -> %s\n", task.name, action)
+		a.printf("registered %q\n  %s\n", entry.name, command)
 	}
 
 	if !a.opts.DryRun {
-		a.println("\nTasks run at logon. Start them now with:")
-		a.printf("  schtasks /run /tn \"%s\"\n", _taskWatch)
-		a.printf("  schtasks /run /tn \"%s\"\n", _taskVolumeKeys)
+		a.println("\nThese start at your next logon. To start them now:")
+		a.printf("  %s watch\n", filepath.Base(exe))
+		a.printf("  %s volumekeys\n", filepath.Base(exe))
 	}
 	return nil
 }
 
 func (a *App) serviceUninstall() error {
-	var failures []string
+	var missing []string
 
-	for _, task := range _tasks {
-		line := buildCommandLine("schtasks", "/delete", "/tn", task.name, "/f")
+	for _, entry := range _entries {
+		line := buildCommandLine("reg", "delete", _runKey, "/v", entry.name, "/f")
 
 		if a.opts.DryRun {
 			a.printf("dry-run: %s\n", line)
 			continue
 		}
 		if err := runCommandLine(line); err != nil {
-			// A task that was never installed is not a failure worth
-			// aborting on; report it and carry on with the rest.
-			failures = append(failures, task.name)
-			a.log.Debug("task removal failed", "task", task.name, "err", err)
+			// An entry that was never registered is not worth aborting on.
+			missing = append(missing, entry.name)
+			a.log.Debug("autostart entry not removed", "entry", entry.name, "err", err)
 			continue
 		}
-		a.printf("removed %q\n", task.name)
+		a.printf("removed %q\n", entry.name)
 	}
 
-	if len(failures) > 0 {
-		a.printf("not removed (probably never installed): %s\n", strings.Join(failures, ", "))
+	if len(missing) > 0 {
+		a.printf("not present: %s\n", strings.Join(missing, ", "))
 	}
 	return nil
 }
 
 func (a *App) serviceStatus() error {
-	for _, task := range _tasks {
-		line := buildCommandLine("schtasks", "/query", "/tn", task.name, "/fo", "list")
+	for _, entry := range _entries {
+		line := buildCommandLine("reg", "query", _runKey, "/v", entry.name)
 
 		out, err := outputOfCommandLine(line)
 		if err != nil {
-			a.printf("%-22s not installed\n", task.name)
+			a.printf("%-22s not installed\n", entry.name)
 			continue
 		}
 
-		status := "unknown"
-		for l := range strings.SplitSeq(out, "\n") {
-			if name, value, ok := strings.Cut(l, ":"); ok && strings.TrimSpace(name) == "Status" {
-				status = strings.TrimSpace(value)
+		// reg query prints "    <name>    REG_SZ    <value>".
+		command := "installed"
+		for line := range strings.SplitSeq(out, "\n") {
+			if _, value, ok := strings.Cut(line, "REG_SZ"); ok {
+				command = strings.TrimSpace(value)
 			}
 		}
-		a.printf("%-22s %s\n", task.name, status)
+		a.printf("%-22s %s\n", entry.name, command)
 	}
 	return nil
 }
 
-// daemonExecutable picks the binary the scheduled tasks should run.
+// daemonExecutable picks the binary the autostart entries should run.
 //
-// A logon task running the console build pops a console window every time it
-// starts, and leaves one in the taskbar for as long as the daemon lives. The
-// windowless build exists for exactly this, so prefer it when it is installed
-// alongside -- which it is when installed from a release archive or by scoop.
+// The console build pops a console window on every logon and leaves one in
+// the taskbar for as long as the daemon lives. The windowless build exists
+// for exactly this and ships alongside, both in the release archive and via
+// scoop, so prefer it when it is there.
 func daemonExecutable() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -157,11 +166,12 @@ func daemonExecutable() (string, error) {
 	return exe, nil
 }
 
-// taskLogPath keeps daemon logs beside the configured one, or in LocalAppData.
-func (a *App) taskLogPath(command string) string {
+// logPath keeps daemon logs beside the configured one, or in LocalAppData.
+func (a *App) logPath(command string) string {
 	if a.cfg.Log.File != "" {
 		return a.cfg.Log.File
 	}
+
 	dir, err := os.UserCacheDir()
 	if err != nil {
 		dir = os.TempDir()
@@ -171,9 +181,9 @@ func (a *App) taskLogPath(command string) string {
 
 // buildCommandLine quotes arguments the way the Windows command line expects.
 //
-// schtasks parses /tr itself, so its value contains quotes of its own. Go's
-// exec would re-escape those and schtasks would receive something it cannot
-// parse, hence building the line by hand and passing it through SysProcAttr.
+// reg parses /d itself and that value contains quotes of its own. Go's exec
+// would re-escape them into something reg cannot read, hence building the
+// line by hand and passing it through SysProcAttr.
 func buildCommandLine(name string, args ...string) string {
 	var b strings.Builder
 	b.WriteString(name)
@@ -204,7 +214,7 @@ func quoteArg(arg string) string {
 }
 
 func runCommandLine(line string) error {
-	cmd := exec.Command("schtasks")
+	cmd := exec.Command("reg")
 	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: line}
 
 	out, err := cmd.CombinedOutput()
@@ -215,7 +225,7 @@ func runCommandLine(line string) error {
 }
 
 func outputOfCommandLine(line string) (string, error) {
-	cmd := exec.Command("schtasks")
+	cmd := exec.Command("reg")
 	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: line}
 
 	out, err := cmd.Output()
