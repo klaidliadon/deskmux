@@ -3,13 +3,13 @@
     "FileVersion": {
       "Major": 0,
       "Minor": 1,
-      "Patch": 0,
+      "Patch": 1,
       "Build": 0
     },
     "ProductVersion": {
       "Major": 0,
       "Minor": 1,
-      "Patch": 0,
+      "Patch": 1,
       "Build": 0
     },
     "FileFlagsMask": "3f",
@@ -22,14 +22,14 @@
     "Comments": "Switches inputs on monitors that advertise VCP 0x60 and then ignore it, by writing the LG sidechannel over raw I2C. Also drives volume, brightness and a dock-triggered profile.",
     "CompanyName": "klaidliadon",
     "FileDescription": "deskmux - DDC/CI monitor control",
-    "FileVersion": "0.1.0.0",
+    "FileVersion": "0.1.1.0",
     "InternalName": "deskmux",
     "LegalCopyright": "Copyright (c) 2026 Alex. MIT licensed.",
     "LegalTrademarks": "",
     "OriginalFilename": "deskmux.exe",
     "PrivateBuild": "",
     "ProductName": "deskmux",
-    "ProductVersion": "0.1.0.0",
+    "ProductVersion": "0.1.1.0",
     "SpecialBuild": ""
   },
   "VarFileInfo": {
