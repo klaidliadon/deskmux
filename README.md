@@ -47,6 +47,18 @@ they all issue the same `SetVCPFeature` call.
 
 ## Install
 
+With [scoop](https://scoop.sh):
+
+```bash
+scoop bucket add klaidliadon https://github.com/klaidliadon/scoop-bucket
+scoop install deskmux
+```
+
+Or download a zip from [releases](https://github.com/klaidliadon/deskmux/releases).
+The binaries are unsigned, so SmartScreen will warn on first run.
+
+From source:
+
 ```bash
 go build -o deskmux.exe ./cmd/deskmux
 ```

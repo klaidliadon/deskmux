@@ -66,34 +66,45 @@ changelog:
       - "^test:"
       - "^chore:"
 
-# Package-manager publishing, for when this repository becomes public.
+# Scoop publishing.
 #
-# Both scoop and winget install by downloading the release asset, so neither
-# can work while the repository is private -- the download URL 404s for
-# anyone without access, including the package manager itself.
+# On each tagged release goreleaser writes a manifest into the bucket repo
+# pointing at that release's zip. Users install with:
 #
-# Scoop, once public:
-#   1. Create a public repo named scoop-bucket.
-#   2. Add a SCOOP_BUCKET_TOKEN secret with a PAT that can push to it. The
-#      built-in GITHUB_TOKEN only has rights to this repository.
-#   3. Uncomment the block below and tag a release.
-#   4. Users then run:
-#        scoop bucket add klaidliadon https://github.com/klaidliadon/scoop-bucket
-#        scoop install deskmux
+#   scoop bucket add klaidliadon https://github.com/klaidliadon/scoop-bucket
+#   scoop install deskmux
 #
-# scoops:
-#   - repository:
-#       owner: klaidliadon
-#       name: scoop-bucket
-#       token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
-#     homepage: https://github.com/klaidliadon/deskmux
-#     description: DDC/CI monitor control for Windows, including LG sidechannel input switching
-#     license: MIT
+# Two prerequisites, both outside this file:
+#
+#   1. A SCOOP_BUCKET_TOKEN secret holding a token that can push to the
+#      bucket repo. The workflow's built-in GITHUB_TOKEN is scoped to this
+#      repository alone and cannot write to another one.
+#
+#   2. The release assets must be publicly downloadable. Scoop fetches the
+#      zip anonymously, so a private release 404s for it exactly as it would
+#      for a stranger.
 #
 # winget is a larger commitment: it opens a pull request against
 # microsoft/winget-pkgs and goes through their review, needs a publicly
 # reachable asset, and expects a stable publisher identity. Worth doing only
 # once the tool has users. goreleaser supports it via a `winget:` block.
+scoops:
+  - name: deskmux
+    ids:
+      - default
+    repository:
+      owner: klaidliadon
+      name: scoop-bucket
+      branch: main
+      token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
+    directory: bucket
+    homepage: https://github.com/klaidliadon/deskmux
+    description: DDC/CI monitor control for Windows, including input switching on LG panels that ignore VCP 0x60
+    license: MIT
+    commit_author:
+      name: goreleaser
+      email: noreply@github.com
+    commit_msg_template: "deskmux: update to {{ .Tag }}"
 
 release:
   draft: false
