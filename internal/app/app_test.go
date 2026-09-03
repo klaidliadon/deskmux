@@ -5,8 +5,8 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/klaidliadon/lginput/ddc"
-	"github.com/klaidliadon/lginput/vcp"
+	"github.com/klaidliadon/deskmux/ddc"
+	"github.com/klaidliadon/deskmux/vcp"
 )
 
 func TestResolveLevel(t *testing.T) {

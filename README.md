@@ -1,4 +1,4 @@
-# lginput
+# deskmux
 
 DDC/CI monitor control for Windows — including **input switching on LG panels
 that no other Windows tool can switch**.
@@ -29,7 +29,7 @@ sent with the DDC **source address `0x50`** ("DDC2AB") rather than the standard
 Twinkle Tray, ControlMyMonitor and every other conventional tool fail here —
 they all issue the same `SetVCPFeature` call.
 
-`lginput` builds the packet by hand and puts it on the bus with NVIDIA's
+`deskmux` builds the packet by hand and puts it on the bus with NVIDIA's
 `NvAPI_I2CWrite`, which does no OS-level DDC wrapping:
 
 ```
@@ -48,21 +48,21 @@ they all issue the same `SetVCPFeature` call.
 ## Install
 
 ```bash
-go build -o lginput.exe ./cmd/lginput
+go build -o deskmux.exe ./cmd/deskmux
 ```
 
 Go 1.25+. For a daemon with no console window:
 
 ```bash
-go build -ldflags -H=windowsgui -o lginputw.exe ./cmd/lginput
+go build -ldflags -H=windowsgui -o deskmuxw.exe ./cmd/deskmux
 ```
 
 ## Quick start
 
 ```bash
-lginput config init      # write a documented config
-lginput probe            # see what your monitor exposes
-lginput input usb-c      # switch
+deskmux config init      # write a documented config
+deskmux probe            # see what your monitor exposes
+deskmux input usb-c      # switch
 ```
 
 ## Commands
@@ -111,7 +111,7 @@ monitor's endpoint never touches your headphones' level.
 ### `watch`
 
 ```bash
-lginput watch
+deskmux watch
 ```
 
 The two directions are deliberately asymmetric. On connect it grabs the panel.
@@ -126,8 +126,8 @@ signal yet.
 
 ## Configuration
 
-`lginput config init` writes a commented file to
-`%APPDATA%\lginput\config.yaml`. Everything hardware-specific lives there, so
+`deskmux config init` writes a commented file to
+`%APPDATA%\deskmux\config.yaml`. Everything hardware-specific lives there, so
 adapting to a different monitor is an edit, not a recompile.
 
 The section that matters:
@@ -183,7 +183,7 @@ Note that maps *merge* rather than replace: adding one entry to
 ## Layout
 
 ```
-cmd/lginput/     entry point
+cmd/deskmux/     entry point
 config/          YAML schema, defaults, loader
 vcp/             protocol primitives (Code, Level, SourceAddr)
 ddc/             standard DDC/CI over dxva2.dll
@@ -212,8 +212,8 @@ binary derives its own version from Go's embedded VCS build info, so
 `go build` alone produces an identifiable binary:
 
 ```
-$ lginput version
-lginput v0.0.0-20260902224239-ba387ed2ce87+dirty (windows/amd64, go1.27.1)
+$ deskmux version
+deskmux v0.0.0-20260902224239-ba387ed2ce87+dirty (windows/amd64, go1.27.1)
 ```
 
 Stamp a release with `make build VERSION=v1.2.3`.

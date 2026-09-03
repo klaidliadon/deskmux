@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/klaidliadon/lginput/vcp"
+	"github.com/klaidliadon/deskmux/vcp"
 )
 
 // The expected bytes are the packets verified against a real LG UltraGear

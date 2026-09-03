@@ -21,7 +21,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/klaidliadon/lginput/vcp"
+	"github.com/klaidliadon/deskmux/vcp"
 )
 
 const (

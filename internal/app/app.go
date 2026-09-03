@@ -1,4 +1,4 @@
-// Package app implements lginput's commands.
+// Package app implements deskmux's commands.
 //
 // It is internal on purpose: the reusable parts are the ddc, nvapi and
 // winaudio packages. What lives here is policy -- which register to poke for
@@ -15,10 +15,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/klaidliadon/lginput/config"
-	"github.com/klaidliadon/lginput/ddc"
-	"github.com/klaidliadon/lginput/nvapi"
-	"github.com/klaidliadon/lginput/vcp"
+	"github.com/klaidliadon/deskmux/config"
+	"github.com/klaidliadon/deskmux/ddc"
+	"github.com/klaidliadon/deskmux/nvapi"
+	"github.com/klaidliadon/deskmux/vcp"
 )
 
 // Options are per-invocation overrides that do not belong in the config file.

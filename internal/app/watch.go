@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/klaidliadon/lginput/config"
-	"github.com/klaidliadon/lginput/vcp"
+	"github.com/klaidliadon/deskmux/config"
+	"github.com/klaidliadon/deskmux/vcp"
 )
 
 // Watch applies a profile when the configured dock appears or disappears.
@@ -19,14 +19,23 @@ import (
 // "auto input switch" setting cannot do this handover. Pushing early works
 // because a panel will happily sit on an input that has no signal yet.
 func (a *App) Watch(ctx context.Context) error {
+	// Two watchers would both fire a profile on the same transition, racing
+	// each other's input switch. volumekeys has always refused a second
+	// instance; this one had no such guard.
+	release, err := singleInstance(`Local\deskmux-watch`)
+	if err != nil {
+		return err
+	}
+	defer release()
+
 	matcher := newDeviceMatcher(a.cfg.Watch.Match)
 	if matcher.empty() {
 		return errors.New("watch.match is empty: nothing to watch for")
 	}
 
-	present, id, err := matcher.find()
-	if err != nil {
-		return err
+	present, id, findErr := matcher.find()
+	if findErr != nil {
+		return findErr
 	}
 
 	a.log.Info("watching for device",

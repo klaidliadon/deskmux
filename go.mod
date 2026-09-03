@@ -1,4 +1,4 @@
-module github.com/klaidliadon/lginput
+module github.com/klaidliadon/deskmux
 
 go 1.25
 

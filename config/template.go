@@ -1,17 +1,17 @@
 package config
 
-// Template is the starter configuration written by `lginput config init`.
+// Template is the starter configuration written by `deskmux config init`.
 //
 // It is hand-written rather than produced by yaml.Marshal so that the
 // comments survive -- the hardware-specific values are the part users most
 // need explained, and a generated file would strip exactly that.
-const Template = `# lginput configuration
+const Template = `# deskmux configuration
 #
 # Defaults below match the LG UltraGear 45GX950A, the only panel this has been
 # verified against. On other monitors the input section is what you are most
 # likely to need to change.
 
-monitor: 0            # index into ` + "`lginput list`" + `
+monitor: 0            # index into ` + "`deskmux list`" + `
 
 ddc:
   settle: 250ms       # wait before a verification read-back
@@ -68,7 +68,7 @@ power:
 
 # Apply a profile when a dock appears or disappears.
 #
-# Find match strings for your own dock with: lginput devices <substring>
+# Find match strings for your own dock with: deskmux devices <substring>
 # Set volume to -1 to leave it alone, or a level to hand over a known volume.
 watch:
   match:

@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/klaidliadon/lginput/config"
-	"github.com/klaidliadon/lginput/ddc"
-	"github.com/klaidliadon/lginput/vcp"
+	"github.com/klaidliadon/deskmux/config"
+	"github.com/klaidliadon/deskmux/ddc"
+	"github.com/klaidliadon/deskmux/vcp"
 )
 
 // Probe reads every register this tool knows about and dumps the capabilities
@@ -310,9 +310,9 @@ func (a *App) Config(args []string) error {
 
 func defaultConfigPath() string {
 	if dir, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(dir, "lginput", "config.yaml")
+		return filepath.Join(dir, "deskmux", "config.yaml")
 	}
-	return "lginput.yaml"
+	return "deskmux.yaml"
 }
 
 func joinSorted[V any](m map[string]V) string {

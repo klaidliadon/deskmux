@@ -60,4 +60,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/klaidliadon/lginput
+        - github.com/klaidliadon/deskmux

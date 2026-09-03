@@ -1,4 +1,4 @@
-# lginput
+# deskmux
 #
 # Written for POSIX make, not just GNU make. The `make` on a Windows box is
 # often BusyBox make, which silently ignores $(shell ...) and $(if ...) rather
@@ -8,8 +8,8 @@
 # Recipes stick to single tool invocations so they behave the same under
 # cmd.exe and a Unix shell.
 
-BINARY := lginput
-PKG    := ./cmd/lginput
+BINARY := deskmux
+PKG    := ./cmd/deskmux
 
 # Optional. Set for a tagged release: make build VERSION=v1.2.3
 # When empty, the binary reports its VCS revision from Go build info.

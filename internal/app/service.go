@@ -19,8 +19,8 @@ import (
 // triggered at logon runs as the user, inside their session, which is what
 // both daemons actually need.
 const (
-	_taskWatch      = "lginput watch"
-	_taskVolumeKeys = "lginput volumekeys"
+	_taskWatch      = "deskmux watch"
+	_taskVolumeKeys = "deskmux volumekeys"
 )
 
 var _tasks = []struct {
@@ -147,7 +147,7 @@ func (a *App) taskLogPath(command string) string {
 	if err != nil {
 		dir = os.TempDir()
 	}
-	return filepath.Join(dir, "lginput", command+".log")
+	return filepath.Join(dir, "deskmux", command+".log")
 }
 
 // buildCommandLine quotes arguments the way the Windows command line expects.

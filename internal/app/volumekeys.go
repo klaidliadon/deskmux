@@ -12,9 +12,9 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/klaidliadon/lginput/ddc"
-	"github.com/klaidliadon/lginput/vcp"
-	"github.com/klaidliadon/lginput/winaudio"
+	"github.com/klaidliadon/deskmux/ddc"
+	"github.com/klaidliadon/deskmux/vcp"
+	"github.com/klaidliadon/deskmux/winaudio"
 )
 
 var (
@@ -141,7 +141,7 @@ func (s *volumeState) syncTo(level int) (adopted bool) {
 // the Windows endpoint, matching how macOS behaves on a display it cannot
 // attenuate. Active only while the monitor is the default playback device.
 func (a *App) VolumeKeys(ctx context.Context) error {
-	release, err := singleInstance(`Local\lginput-volumekeys`)
+	release, err := singleInstance(`Local\deskmux-volumekeys`)
 	if err != nil {
 		return err
 	}
@@ -471,7 +471,7 @@ func (a *App) runVolumeWriter(ctx context.Context, state *volumeState) {
 	}
 }
 
-// resyncVolume adopts a level set by something else: another lginput call, a
+// resyncVolume adopts a level set by something else: another deskmux call, a
 // dock profile, or the other machine while it had the panel.
 func (a *App) resyncVolume(session *volumeSession, state *volumeState) {
 	if !session.ready() {

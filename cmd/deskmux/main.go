@@ -1,4 +1,4 @@
-// Command lginput controls DDC/CI monitors on Windows, including input
+// Command deskmux controls DDC/CI monitors on Windows, including input
 // switching on LG panels that advertise the standard register and then
 // silently ignore it.
 package main
@@ -12,12 +12,13 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"syscall"
 
-	"github.com/klaidliadon/lginput/config"
-	"github.com/klaidliadon/lginput/internal/app"
+	"github.com/klaidliadon/deskmux/config"
+	"github.com/klaidliadon/deskmux/internal/app"
 )
 
 // version may be stamped at build time with
@@ -78,7 +79,7 @@ func main() {
 }
 
 func run(argv []string) error {
-	fs := flag.NewFlagSet("lginput", flag.ContinueOnError)
+	fs := flag.NewFlagSet("deskmux", flag.ContinueOnError)
 	fs.SetOutput(io.Discard) // usage() handles presentation
 	fs.Usage = usage
 
@@ -104,7 +105,7 @@ func run(argv []string) error {
 	// Answered before loading configuration: `version` must work even when
 	// the config file is missing or malformed.
 	if args[0] == "version" {
-		fmt.Printf("lginput %s (%s/%s, %s)\n",
+		fmt.Printf("deskmux %s (%s/%s, %s)\n",
 			buildVersion(), runtime.GOOS, runtime.GOARCH, runtime.Version())
 		return nil
 	}
@@ -165,6 +166,15 @@ func newLogger(cfg config.Log) (*slog.Logger, func(), error) {
 	var sink io.Writer = os.Stderr
 
 	if cfg.File != "" {
+		// Create the directory: a scheduled task pointed at a log under
+		// LocalAppData would otherwise fail to start on a fresh machine,
+		// with no console to report why.
+		if dir := filepath.Dir(cfg.File); dir != "" && dir != "." {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return nil, nil, fmt.Errorf("create log directory %s: %w", dir, err)
+			}
+		}
+
 		f, err := os.OpenFile(cfg.File, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		if err != nil {
 			return nil, nil, fmt.Errorf("open log file %s: %w", cfg.File, err)
@@ -183,9 +193,9 @@ func newLogger(cfg config.Log) (*slog.Logger, func(), error) {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `lginput - DDC/CI monitor control for Windows
+	fmt.Fprint(os.Stderr, `deskmux - DDC/CI monitor control for Windows
 
-usage: lginput [flags] <command> [args]
+usage: deskmux [flags] <command> [args]
 
 daemons:
   watch                   apply a profile when the configured dock appears

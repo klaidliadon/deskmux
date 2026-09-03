@@ -1,4 +1,4 @@
-// Package config defines lginput's on-disk configuration.
+// Package config defines deskmux's on-disk configuration.
 //
 // Everything hardware-specific lives here rather than in code: the VCP
 // registers, the DDC source addresses and the per-input values all vary
@@ -15,7 +15,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/klaidliadon/lginput/vcp"
+	"github.com/klaidliadon/deskmux/vcp"
 )
 
 // Duration wraps time.Duration so durations can be written as "250ms" in
@@ -106,7 +106,7 @@ type Profile struct {
 // Watch configures the dock watcher.
 type Watch struct {
 	// Match lists device-ID substrings that identify the dock. Find them
-	// with `lginput devices <substring>`.
+	// with `deskmux devices <substring>`.
 	Match    []string `yaml:"match"`
 	Poll     Duration `yaml:"poll"`
 	OnDock   Profile  `yaml:"on_dock"`
@@ -197,12 +197,12 @@ var ErrNotFound = errors.New("no configuration file found")
 func SearchPaths() []string {
 	var paths []string
 	if dir, err := os.UserConfigDir(); err == nil {
-		paths = append(paths, filepath.Join(dir, "lginput", "config.yaml"))
+		paths = append(paths, filepath.Join(dir, "deskmux", "config.yaml"))
 	}
 	if exe, err := os.Executable(); err == nil {
-		paths = append(paths, filepath.Join(filepath.Dir(exe), "lginput.yaml"))
+		paths = append(paths, filepath.Join(filepath.Dir(exe), "deskmux.yaml"))
 	}
-	paths = append(paths, "lginput.yaml")
+	paths = append(paths, "deskmux.yaml")
 	return paths
 }
 

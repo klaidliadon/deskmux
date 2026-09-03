@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/klaidliadon/lginput/vcp"
+	"github.com/klaidliadon/deskmux/vcp"
 )
 
 func TestDefaultIsValid(t *testing.T) {

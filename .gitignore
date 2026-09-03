@@ -5,4 +5,4 @@
 *.log
 
 # local configuration (the template lives in config/template.go)
-lginput.yaml
+deskmux.yaml
