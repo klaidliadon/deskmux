@@ -50,13 +50,9 @@ func (a *App) Service(args []string) error {
 }
 
 func (a *App) serviceInstall() error {
-	exe, err := os.Executable()
+	exe, err := daemonExecutable()
 	if err != nil {
-		return fmt.Errorf("locate this executable: %w", err)
-	}
-	exe, err = filepath.Abs(exe)
-	if err != nil {
-		return fmt.Errorf("resolve %s: %w", exe, err)
+		return err
 	}
 
 	for _, task := range _tasks {
@@ -136,6 +132,29 @@ func (a *App) serviceStatus() error {
 		a.printf("%-22s %s\n", task.name, status)
 	}
 	return nil
+}
+
+// daemonExecutable picks the binary the scheduled tasks should run.
+//
+// A logon task running the console build pops a console window every time it
+// starts, and leaves one in the taskbar for as long as the daemon lives. The
+// windowless build exists for exactly this, so prefer it when it is installed
+// alongside -- which it is when installed from a release archive or by scoop.
+func daemonExecutable() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("locate this executable: %w", err)
+	}
+	exe, err = filepath.Abs(exe)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", exe, err)
+	}
+
+	windowless := filepath.Join(filepath.Dir(exe), "deskmuxw.exe")
+	if info, err := os.Stat(windowless); err == nil && !info.IsDir() {
+		return windowless, nil
+	}
+	return exe, nil
 }
 
 // taskLogPath keeps daemon logs beside the configured one, or in LocalAppData.
