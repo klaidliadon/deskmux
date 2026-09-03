@@ -51,10 +51,10 @@ func (a *App) Probe() error {
 	for _, c := range codes {
 		v, err := m.GetVCP(c.code)
 		if err != nil {
-			a.printf("0x%02X   %-28s unsupported\n", c.code, c.name)
+			a.printf("%-6s %-28s unsupported\n", c.code, c.name)
 			continue
 		}
-		a.printf("0x%02X   %-28s current=%d max=%d type=%d\n", c.code, c.name, v.Current, v.Max, v.Type)
+		a.printf("%-6s %-28s current=%d max=%d type=%d\n", c.code, c.name, v.Current, v.Max, v.Type)
 	}
 
 	a.println("\nnote: a register reading fine says nothing about whether writes land.")
@@ -82,7 +82,7 @@ func (a *App) Get(args []string) error {
 	if err != nil {
 		return err
 	}
-	a.printf("0x%02X: current=%d (0x%02X) max=%d type=%d\n", code, v.Current, v.Current, v.Max, v.Type)
+	a.printf("%s: current=%s max=%s type=%d\n", code, v.Current, v.Max, v.Type)
 	return nil
 }
 
@@ -107,7 +107,7 @@ func (a *App) Set(args []string) error {
 	defer set.Close()
 
 	if a.opts.DryRun {
-		a.printf("dry-run: set 0x%02X = %d\n", code, value)
+		a.printf("dry-run: set %s = %s\n", code, value)
 		return nil
 	}
 
@@ -116,7 +116,7 @@ func (a *App) Set(args []string) error {
 		return err
 	}
 
-	a.printf("0x%02X <- %d; read back %d; landed=%v\n", code, value, readback, landed)
+	a.printf("%s <- %s; read back %s; landed=%v\n", code, value, readback, landed)
 	if !landed {
 		a.println("the API accepted the write but the monitor did not take it")
 	}
@@ -221,7 +221,7 @@ func (a *App) Table(args []string, t config.Table, label string) error {
 		return fmt.Errorf("unknown %s mode %q (want %s)", label, args[0], joinSorted(t.Modes))
 	}
 
-	a.printf("%s %s: 0x%02X = 0x%02X\n", label, args[0], t.VCP, mode)
+	a.printf("%s %s: %s = %s\n", label, args[0], t.VCP, mode)
 	if a.opts.DryRun {
 		return nil
 	}
@@ -233,7 +233,7 @@ func (a *App) Table(args []string, t config.Table, label string) error {
 
 			time.Sleep(a.cfg.DDC.Settle.D())
 			if v, err := m.GetVCP(t.VCP); err == nil {
-				a.printf("  read back: %d (0x%02X)\n", v.Current, v.Current)
+				a.printf("  read back: %s\n", v.Current)
 			}
 			return nil
 		}
