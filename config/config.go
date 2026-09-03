@@ -7,8 +7,10 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -43,6 +45,43 @@ func (d *Duration) UnmarshalYAML(node *yaml.Node) error {
 		return fmt.Errorf("parse duration %q: %w", s, err)
 	}
 	*d = Duration(parsed)
+	return nil
+}
+
+// LevelMap and AliasMap replace rather than merge when decoded.
+//
+// yaml.v3 decodes a mapping into a non-nil map by setting keys one at a time,
+// so a user who writes their own inputs.targets would keep the built-in
+// entries alongside theirs -- on a monitor where those values are wrong,
+// silently, with no way to remove them. Replacing on decode makes the file
+// say what it means.
+type LevelMap map[string]vcp.Level
+
+// UnmarshalYAML replaces the map instead of merging into it.
+//
+// Decoding into the underlying map type rather than LevelMap is load-bearing:
+// decoding into the named type would re-enter this method and recurse until
+// the stack is exhausted.
+func (m *LevelMap) UnmarshalYAML(node *yaml.Node) error {
+	fresh := make(map[string]vcp.Level)
+	if err := node.Decode(&fresh); err != nil {
+		return err
+	}
+	*m = fresh
+	return nil
+}
+
+// AliasMap maps an alternative input name onto a defined one.
+type AliasMap map[string]string
+
+// UnmarshalYAML replaces the map instead of merging into it. As above, the
+// intermediate must be the underlying map type or this recurses.
+func (m *AliasMap) UnmarshalYAML(node *yaml.Node) error {
+	fresh := make(map[string]string)
+	if err := node.Decode(&fresh); err != nil {
+		return err
+	}
+	*m = fresh
 	return nil
 }
 
@@ -87,17 +126,17 @@ type Registers struct {
 // recent LG panels 0x60 is advertised and then silently ignored, and the real
 // control is VCP 0xF4 at source address 0x50.
 type Inputs struct {
-	VCP        vcp.Code             `yaml:"vcp"`
-	SourceAddr vcp.SourceAddr       `yaml:"source_addr"`
-	Targets    map[string]vcp.Level `yaml:"targets"`
-	Aliases    map[string]string    `yaml:"aliases"`
+	VCP        vcp.Code       `yaml:"vcp"`
+	SourceAddr vcp.SourceAddr `yaml:"source_addr"`
+	Targets    LevelMap       `yaml:"targets"`
+	Aliases    AliasMap       `yaml:"aliases"`
 }
 
 // Table is a VCP register plus its named values.
 type Table struct {
-	VCP        vcp.Code             `yaml:"vcp"`
-	SourceAddr vcp.SourceAddr       `yaml:"source_addr"`
-	Modes      map[string]vcp.Level `yaml:"modes"`
+	VCP        vcp.Code       `yaml:"vcp"`
+	SourceAddr vcp.SourceAddr `yaml:"source_addr"`
+	Modes      LevelMap       `yaml:"modes"`
 }
 
 // Profile is what to apply on a dock transition.
@@ -177,12 +216,12 @@ func Default() Config {
 		PBP: Table{
 			VCP:        0xD7,
 			SourceAddr: 0x51,
-			Modes:      map[string]vcp.Level{"off": 0x01, "50": 0x05, "66": 0x03},
+			Modes:      LevelMap{"off": 0x01, "50": 0x05, "66": 0x03},
 		},
 		Power: Table{
 			VCP:        0xD6,
 			SourceAddr: 0x51,
-			Modes:      map[string]vcp.Level{"on": 0x01, "off": 0x04},
+			Modes:      LevelMap{"on": 0x01, "off": 0x04},
 		},
 		Watch: Watch{
 			Match:    []string{"VID_1E91", "VEN_OWC_TB3", "SUBSYS_00191C7A"},
@@ -240,7 +279,14 @@ func Load(path string) (Config, string, error) {
 		if err != nil {
 			return cfg, "", fmt.Errorf("read %s: %w", candidate, err)
 		}
-		if err := yaml.Unmarshal(data, &cfg); err != nil {
+		// KnownFields turns a misspelled key into an error. Without it yaml
+		// silently ignores anything it does not recognise, so "steps: 2" or
+		// "bus_dely: 5s" leaves the default in place and the user is left
+		// wondering why their configuration has no effect.
+		dec := yaml.NewDecoder(bytes.NewReader(data))
+		dec.KnownFields(true)
+
+		if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 			return cfg, candidate, fmt.Errorf("parse %s: %w", candidate, err)
 		}
 		if err := cfg.Validate(); err != nil {

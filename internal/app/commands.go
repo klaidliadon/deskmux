@@ -169,7 +169,14 @@ func resolveLevel(arg string, cur ddc.Reading) (vcp.Level, error) {
 	if relative {
 		v = int64(cur.Current) + n
 	}
-	return vcp.Level(min(max(v, 0), int64(cur.Max))), nil
+
+	// A monitor that reports max=0 would otherwise clamp every level to zero,
+	// silently. VolumeKeys already guards against this; resolveLevel did not.
+	upper := int64(cur.Max)
+	if upper <= 0 {
+		upper = 100
+	}
+	return vcp.Level(min(max(v, 0), upper)), nil
 }
 
 // Mute writes the mute register. 1 mutes, 2 unmutes, per MCCS.

@@ -11,12 +11,14 @@ const Template = `# deskmux configuration
 # verified against. On other monitors the input section is what you are most
 # likely to need to change.
 
-monitor: 0            # index into ` + "`deskmux list`" + `
+monitor: 0            # index into ` + "`deskmux probe`" + `
 
 ddc:
   settle: 250ms       # wait before a verification read-back
   bus_delay: 40ms     # pause between raw I2C writes; below ~40ms risks
                       # wedging panels with fragile DDC engines
+  source_addr: 0x51   # DDC source address for ordinary writes; only the
+                      # inputs section normally departs from the standard
 
 # Standard VCP codes. These are MCCS-standard and rarely need changing.
 registers:

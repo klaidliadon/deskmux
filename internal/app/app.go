@@ -66,9 +66,9 @@ func (a *App) Run(ctx context.Context, cmd string, args []string) error {
 	case "volume":
 		return a.Level(args, a.cfg.Registers.Volume, "volume")
 	case "mute":
-		return a.Mute(1)
+		return a.Mute(_muteOn)
 	case "unmute":
-		return a.Mute(2)
+		return a.Mute(_muteOff)
 	case "input":
 		return a.Input(args)
 	case "pbp":

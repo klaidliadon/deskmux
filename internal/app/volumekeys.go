@@ -24,6 +24,7 @@ var (
 	_unhookWindows  = _user32.NewProc("UnhookWindowsHookEx")
 	_getMessage     = _user32.NewProc("GetMessageW")
 	_postThreadMsg  = _user32.NewProc("PostThreadMessageW")
+	_peekMessage    = _user32.NewProc("PeekMessageW")
 
 	_kernel32      = syscall.NewLazyDLL("kernel32.dll")
 	_getCurrentTID = _kernel32.NewProc("GetCurrentThreadId")
@@ -37,6 +38,8 @@ const (
 	_wmKeyDown    = 0x0100
 	_wmSysKeyDown = 0x0104
 	_wmQuit       = 0x0012
+	_wmUser       = 0x0400
+	_pmNoRemove   = 0x0000
 
 	_vkVolumeMute = 0xAD
 	_vkVolumeDown = 0xAE
@@ -180,7 +183,7 @@ func (a *App) VolumeKeys(ctx context.Context) error {
 	wg.Go(func() { a.newDeviceTracker(&active).run(ctx) })
 
 	hook := newKeyHook(state, &active, cfg.Step)
-	wg.Go(hook.run)
+	wg.Go(func() { hook.run(ctx) })
 
 	// The hook thread parks in GetMessage, which returns only when a message
 	// arrives, so shutdown must post WM_QUIT to it. Taking ctx.Done() without
@@ -189,6 +192,7 @@ func (a *App) VolumeKeys(ctx context.Context) error {
 	var runErr error
 	select {
 	case <-hook.ready:
+		// ready is closed, not consumed, so stop can still find the id.
 		a.log.Info("listening for volume keys")
 		select {
 		case <-ctx.Done():
@@ -264,11 +268,18 @@ type keyHook struct {
 	active *atomic.Bool
 	step   int
 
-	ready chan uint32 // carries the thread id once the hook is installed
+	// tid is published before ready is closed, so stop can wake the thread
+	// whether or not anyone observed ready.
+	//
+	// An earlier version carried the thread id on the channel itself. The
+	// waiting select received it and discarded it, leaving stop with a
+	// drained channel and no id, so WM_QUIT was never posted and every
+	// shutdown hung. Keeping the id in a field that any number of readers can
+	// observe removes that hazard rather than relying on remembering to
+	// assign it.
+	tid   atomic.Uint32
+	ready chan struct{}
 	done  chan error
-
-	tid     uint32
-	haveTID bool
 }
 
 func newKeyHook(state *volumeState, active *atomic.Bool, step int) *keyHook {
@@ -276,12 +287,12 @@ func newKeyHook(state *volumeState, active *atomic.Bool, step int) *keyHook {
 		state:  state,
 		active: active,
 		step:   step,
-		ready:  make(chan uint32, 1),
+		ready:  make(chan struct{}),
 		done:   make(chan error, 1),
 	}
 }
 
-func (h *keyHook) run() {
+func (h *keyHook) run(ctx context.Context) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
@@ -294,10 +305,24 @@ func (h *keyHook) run() {
 	}
 	defer _unhookWindows.Call(handle)
 
-	tid, _, _ := _getCurrentTID.Call()
-	h.ready <- uint32(tid)
-
+	// Force the message queue into existence before advertising the thread
+	// id. PostThreadMessage fails with ERROR_INVALID_THREAD_ID against a
+	// thread that has never had a queue, and a lost WM_QUIT means this
+	// goroutine parks in GetMessage forever.
 	var msg winMsg
+	_peekMessage.Call(uintptr(unsafe.Pointer(&msg)), 0, _wmUser, _wmUser, _pmNoRemove)
+
+	tid, _, _ := _getCurrentTID.Call()
+	h.tid.Store(uint32(tid))
+	close(h.ready)
+
+	// Cancellation between installing the hook and reaching GetMessage would
+	// otherwise be missed: stop may already have run and found no id.
+	if ctx.Err() != nil {
+		h.done <- nil
+		return
+	}
+
 	for {
 		r, _, _ := _getMessage.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
 		if int32(r) <= 0 { // 0 = WM_QUIT, -1 = error
@@ -334,16 +359,12 @@ func (h *keyHook) onKey(code int32, wParam, lParam uintptr) uintptr {
 }
 
 // stop wakes the message loop so run can unhook and return.
+//
+// Safe to call whether or not the hook ever installed, and safe to call more
+// than once: a zero thread id simply means there is nothing parked yet.
 func (h *keyHook) stop() {
-	if !h.haveTID {
-		select {
-		case h.tid = <-h.ready:
-			h.haveTID = true
-		default:
-		}
-	}
-	if h.haveTID {
-		_postThreadMsg.Call(uintptr(h.tid), _wmQuit, 0, 0)
+	if tid := h.tid.Load(); tid != 0 {
+		_postThreadMsg.Call(uintptr(tid), _wmQuit, 0, 0)
 	}
 }
 
@@ -529,7 +550,7 @@ func (t *deviceTracker) run(ctx context.Context) {
 
 // driftChecks is how many polls pass between endpoint-level checks. Reading
 // the level is cheap but not free, and drift is rare.
-const driftChecks = 10
+const _driftChecks = 10
 
 // poll compares device IDs, which is far cheaper than reading friendly names,
 // and pays for the name only when the device actually changed.
@@ -553,7 +574,7 @@ func (t *deviceTracker) poll(session *winaudio.Session) {
 	if !t.matched || !t.app.cfg.VolumeKeys.PinWindows {
 		return
 	}
-	if t.since++; t.since < driftChecks {
+	if t.since++; t.since < _driftChecks {
 		return
 	}
 	t.since = 0

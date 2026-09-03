@@ -13,7 +13,9 @@ package ddc
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -95,7 +97,7 @@ func Open() (*Set, error) {
 		for i := range arr {
 			set.Monitors = append(set.Monitors, Monitor{
 				Handle: arr[i].Handle,
-				Name:   strings.TrimRight(syscall.UTF16ToString(arr[i].Description[:]), "\x00"),
+				Name:   syscall.UTF16ToString(arr[i].Description[:]),
 			})
 		}
 	}
@@ -106,17 +108,37 @@ func Open() (*Set, error) {
 	return set, nil
 }
 
-func monitorHandles() ([]uintptr, error) {
-	var handles []uintptr
-	callback := syscall.NewCallback(func(monitor, hdc, clip, data uintptr) uintptr {
-		handles = append(handles, monitor)
+// The enumeration callback is registered once, at package initialisation.
+//
+// syscall.NewCallback identifies callbacks by function value, so a closure
+// built inside monitorHandles would register a new one on every call. Those
+// registrations are never released and the runtime throws -- fatally, not
+// recoverably -- past a fixed ceiling of a couple of thousand. A daemon
+// retrying a monitor that is asleep or on another input reaches that in under
+// a day, which is precisely when it is least welcome.
+//
+// EnumDisplayMonitors invokes the callback synchronously on the calling
+// thread, so a mutex around the shared slice is sufficient.
+var (
+	_enumMu      sync.Mutex
+	_enumHandles []uintptr
+
+	_enumCallback = syscall.NewCallback(func(monitor, hdc, clip, data uintptr) uintptr {
+		_enumHandles = append(_enumHandles, monitor)
 		return 1 // continue enumeration
 	})
+)
 
-	if r, _, err := _enumDisplayMonitors.Call(0, 0, callback, 0); r == 0 {
+func monitorHandles() ([]uintptr, error) {
+	_enumMu.Lock()
+	defer _enumMu.Unlock()
+
+	_enumHandles = _enumHandles[:0]
+
+	if r, _, err := _enumDisplayMonitors.Call(0, 0, _enumCallback, 0); r == 0 {
 		return nil, fmt.Errorf("EnumDisplayMonitors: %w", err)
 	}
-	return handles, nil
+	return slices.Clone(_enumHandles), nil
 }
 
 // Close releases the native handles.
@@ -142,6 +164,12 @@ func retry(op func() error) error {
 	for attempt := range _retries {
 		if err = op(); err == nil {
 			return nil
+		}
+		// No sleep after the final attempt: there is nothing left to wait
+		// for, and every terminal failure was paying an extra backoff. Probe
+		// reads eight registers and an unsupported one fails all four times.
+		if attempt == _retries-1 {
+			break
 		}
 		time.Sleep(time.Duration(attempt+1) * _backoff)
 	}

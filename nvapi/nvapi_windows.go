@@ -71,17 +71,49 @@ type Client struct {
 
 // NVAPI initialisation is process-wide and idempotent, and LoadLibrary leaks
 // a module reference per call, so resolve once and reuse.
-var _load = sync.OnceValues(newClient)
+var (
+	_mu     sync.Mutex
+	_client *Client
+)
 
 // Load resolves NVAPI and enumerates GPUs. Safe to call repeatedly; the work
 // happens once.
-func Load() (*Client, error) { return _load() }
+//
+// Only success is cached. sync.OnceValues would memoise a failure too, and
+// this runs in daemons that live for weeks: a driver restart, or GPU
+// enumeration racing the driver at logon, would otherwise disable input
+// switching permanently with no way back short of restarting the process.
+func Load() (*Client, error) {
+	_mu.Lock()
+	defer _mu.Unlock()
+
+	if _client != nil {
+		return _client, nil
+	}
+
+	client, err := newClient()
+	if err != nil {
+		return nil, err
+	}
+
+	_client = client
+	return _client, nil
+}
 
 func newClient() (*Client, error) {
 	lib, err := syscall.LoadLibrary("nvapi64.dll")
 	if err != nil {
 		return nil, fmt.Errorf("load nvapi64.dll (NVIDIA driver installed?): %w", err)
 	}
+
+	// Released on every failure path below: Load retries after a failure, so
+	// leaking a module reference per attempt would accumulate.
+	ok := false
+	defer func() {
+		if !ok {
+			_ = syscall.FreeLibrary(lib)
+		}
+	}()
 
 	var queryInterface uintptr
 	for _, name := range []string{"nvapi_QueryInterface", "nvapi64_QueryInterface"} {
@@ -137,6 +169,8 @@ func newClient() (*Client, error) {
 	if len(c.gpus) == 0 {
 		return nil, fmt.Errorf("no NVIDIA GPUs found")
 	}
+
+	ok = true
 	return c, nil
 }
 
@@ -169,8 +203,7 @@ func cString(b []byte) string {
 // The destination address is not in the buffer but is folded into the
 // checksum.
 func BuildSetVCP(source vcp.SourceAddr, code vcp.Code, value vcp.Level) []byte {
-	pkt := make([]byte, 7)
-	copy(pkt, []byte{byte(source), 0x84, 0x03, byte(code), byte(value >> 8), byte(value)})
+	pkt := []byte{byte(source), 0x84, 0x03, byte(code), byte(value >> 8), byte(value), 0}
 
 	checksum := vcp.DeviceAddr
 	for _, b := range pkt[:6] {

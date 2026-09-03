@@ -89,6 +89,72 @@ func TestLoadOverlaysOntoDefaults(t *testing.T) {
 	}
 }
 
+// A misspelled key used to be silently ignored, leaving the default in place
+// and the user wondering why their configuration had no effect.
+func TestLoadRejectsUnknownKeys(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"misspelled leaf", "volume_keys:\n  steps: 99\n"},
+		{"misspelled nested key", "ddc:\n  bus_dely: 5s\n"},
+		{"misspelled section", "volumekeys:\n  step: 2\n"},
+		{"key that never existed", "colour: blue\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tt.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, _, err := Load(path); err == nil {
+				t.Fatalf("unknown key %q was accepted silently", tt.body)
+			}
+		})
+	}
+}
+
+// Maps must replace, not merge. Someone adapting this to a different monitor
+// has to be able to remove the built-in entries, not just add to them.
+func TestLoadReplacesMapsRatherThanMerging(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	body := "inputs:\n  targets:\n    only-one: 0x77\n  aliases:\n    one: only-one\n"
+
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, _, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if len(cfg.Inputs.Targets) != 1 {
+		t.Errorf("targets = %v, want only the one the file defines", cfg.Inputs.Targets)
+	}
+	if got, ok := cfg.Inputs.Targets["only-one"]; !ok || got != 0x77 {
+		t.Errorf("targets[only-one] = %v (present=%v), want 0x77", got, ok)
+	}
+	for _, gone := range []string{"hdmi1", "hdmi2", "dp", "usb-c"} {
+		if _, ok := cfg.Inputs.Targets[gone]; ok {
+			t.Errorf("built-in target %q survived a file that redefines targets", gone)
+		}
+	}
+	if _, ok := cfg.Inputs.Aliases["dp2"]; ok {
+		t.Error("built-in alias dp2 survived a file that redefines aliases")
+	}
+
+	// Sections the file does not mention keep their defaults.
+	if cfg.PBP.Modes["off"] != 0x01 {
+		t.Error("pbp modes should be untouched when the file does not mention them")
+	}
+	if cfg.Inputs.VCP != Default().Inputs.VCP {
+		t.Error("inputs.vcp should be untouched when the file does not mention it")
+	}
+}
+
 func TestLoadMissingExplicitPathIsAnError(t *testing.T) {
 	_, _, err := Load(filepath.Join(t.TempDir(), "absent.yaml"))
 	if !errors.Is(err, ErrNotFound) {

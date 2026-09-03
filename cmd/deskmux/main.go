@@ -152,14 +152,14 @@ func run(argv []string) error {
 }
 
 func newLogger(cfg config.Log) (*slog.Logger, func(), error) {
+	// slog.Level implements encoding.TextUnmarshaler, which handles case and
+	// offsets such as "warn+2" for free, and reports a bad value instead of
+	// silently falling back to info.
 	level := slog.LevelInfo
-	switch cfg.Level {
-	case "debug":
-		level = slog.LevelDebug
-	case "warn":
-		level = slog.LevelWarn
-	case "error":
-		level = slog.LevelError
+	if cfg.Level != "" {
+		if err := level.UnmarshalText([]byte(cfg.Level)); err != nil {
+			return nil, nil, fmt.Errorf("log level %q: %w", cfg.Level, err)
+		}
 	}
 
 	closeLog := func() {}
@@ -243,7 +243,7 @@ configuration:
   config path             show where configuration is searched for
   version                 print the version and toolchain
 
-service (Windows scheduled tasks, run at logon as you):
+service (per-user autostart entries, run at logon as you):
   service install         register watch and volumekeys to start at logon
   service uninstall       remove them
   service status          report whether they are installed
