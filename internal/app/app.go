@@ -16,7 +16,6 @@ import (
 	"strings"
 
 	"github.com/klaidliadon/deskmux/config"
-	"github.com/klaidliadon/deskmux/ddc"
 	"github.com/klaidliadon/deskmux/nvapi"
 	"github.com/klaidliadon/deskmux/vcp"
 )
@@ -37,12 +36,26 @@ type App struct {
 	log  *slog.Logger
 	out  io.Writer
 	opts Options
+
+	// panels and bus are the two hardware seams. New wires them to the real
+	// implementations; tests in this package substitute fakes by assignment,
+	// which keeps dependency injection out of main for a program that has
+	// exactly one real backend.
+	panels Opener
+	bus    Bus
 }
 
 // New builds an App. out receives command results, which are program output
 // rather than logs; log receives operational events.
 func New(cfg config.Config, logger *slog.Logger, out io.Writer, opts Options) *App {
-	return &App{cfg: cfg, log: logger, out: out, opts: opts}
+	return &App{
+		cfg:    cfg,
+		log:    logger,
+		out:    out,
+		opts:   opts,
+		panels: ddcOpener{},
+		bus:    nvapiBus{},
+	}
 }
 
 // printf writes program output. Diagnostics go through a.log instead.
@@ -100,19 +113,9 @@ func (a *App) monitorIndex() int {
 	return a.cfg.Monitor
 }
 
-// openMonitor returns the selected monitor. The caller must close the set.
-func (a *App) openMonitor() (*ddc.Set, ddc.Monitor, error) {
-	set, err := ddc.Open()
-	if err != nil {
-		return nil, ddc.Monitor{}, err
-	}
-
-	idx := a.monitorIndex()
-	if idx < 0 || idx >= len(set.Monitors) {
-		set.Close()
-		return nil, ddc.Monitor{}, fmt.Errorf("monitor index %d out of range (%d found)", idx, len(set.Monitors))
-	}
-	return set, set.Monitors[idx], nil
+// openPanel returns the selected monitor. The caller must close it.
+func (a *App) openPanel() (Panel, error) {
+	return a.panels.Open(a.monitorIndex())
 }
 
 func parseVCP(s string) (vcp.Code, error) {
@@ -147,18 +150,16 @@ func (a *App) sendRaw(source vcp.SourceAddr, code vcp.Code, value vcp.Level, lab
 		return nil
 	}
 
-	client, err := nvapi.Load()
-	if err != nil {
-		return err
-	}
-
-	attempts := client.Write(pkt, nvapi.WriteOptions{
+	attempts, err := a.bus.Write(pkt, nvapi.WriteOptions{
 		Fast:  a.opts.Fast,
 		Delay: a.cfg.DDC.BusDelay.D(),
 		OnGPUError: func(gpu int, err error) {
 			a.log.Warn("gpu enumeration failed", "gpu", gpu, "err", err)
 		},
 	})
+	if err != nil {
+		return err
+	}
 
 	var accepted int
 	for _, at := range attempts {
@@ -193,10 +194,14 @@ func (a *App) sendRaw(source vcp.SourceAddr, code vcp.Code, value vcp.Level, lab
 // back to raw I2C when the Windows DDC layer is unavailable, which happens
 // routinely on panels whose DDC engine has wedged.
 func (a *App) setVolume(level vcp.Level) string {
-	if set, m, err := a.openMonitor(); err == nil {
-		defer set.Close()
+	if a.opts.DryRun {
+		return fmt.Sprintf("dry-run: would set %d", level)
+	}
 
-		landed, readback, err := m.SetVCPVerified(a.cfg.Registers.Volume, level, a.cfg.DDC.Settle.D())
+	if p, err := a.openPanel(); err == nil {
+		defer p.Close()
+
+		landed, readback, err := p.SetVerified(a.cfg.Registers.Volume, level, a.cfg.DDC.Settle.D())
 		if err == nil {
 			if landed {
 				return fmt.Sprintf("%d via DDC, verified", readback)
@@ -205,13 +210,11 @@ func (a *App) setVolume(level vcp.Level) string {
 		}
 	}
 
-	client, err := nvapi.Load()
+	pkt := nvapi.BuildSetVCP(a.cfg.DDC.SourceAddr, a.cfg.Registers.Volume, level)
+	attempts, err := a.bus.Write(pkt, nvapi.WriteOptions{Fast: true, Delay: a.cfg.DDC.BusDelay.D()})
 	if err != nil {
 		return fmt.Sprintf("DDC unavailable and NVAPI failed: %v", err)
 	}
-
-	pkt := nvapi.BuildSetVCP(a.cfg.DDC.SourceAddr, a.cfg.Registers.Volume, level)
-	attempts := client.Write(pkt, nvapi.WriteOptions{Fast: true, Delay: a.cfg.DDC.BusDelay.D()})
 
 	var accepted int
 	for _, at := range attempts {

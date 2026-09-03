@@ -19,14 +19,14 @@ import (
 // Probe reads every register this tool knows about and dumps the capabilities
 // string. It is the starting point for adapting the config to a new monitor.
 func (a *App) Probe() error {
-	set, m, err := a.openMonitor()
+	p, err := a.openPanel()
 	if err != nil {
 		return err
 	}
-	defer set.Close()
+	defer p.Close()
 
-	a.printf("monitor: %s\n\n", m.Name)
-	if caps, err := m.Capabilities(); err == nil {
+	a.printf("monitor: %s\n\n", p.Name())
+	if caps, err := p.Capabilities(); err == nil {
 		a.printf("caps: %s\n\n", caps)
 	} else {
 		a.log.Warn("capabilities read failed", "err", err)
@@ -49,7 +49,7 @@ func (a *App) Probe() error {
 
 	a.printf("%-6s %-28s %s\n", "code", "name", "read")
 	for _, c := range codes {
-		v, err := m.GetVCP(c.code)
+		v, err := p.Get(c.code)
 		if err != nil {
 			a.printf("%-6s %-28s unsupported\n", c.code, c.name)
 			continue
@@ -72,13 +72,13 @@ func (a *App) Get(args []string) error {
 		return err
 	}
 
-	set, m, err := a.openMonitor()
+	p, err := a.openPanel()
 	if err != nil {
 		return err
 	}
-	defer set.Close()
+	defer p.Close()
 
-	v, err := m.GetVCP(code)
+	v, err := p.Get(code)
 	if err != nil {
 		return err
 	}
@@ -100,18 +100,20 @@ func (a *App) Set(args []string) error {
 		return err
 	}
 
-	set, m, err := a.openMonitor()
-	if err != nil {
-		return err
-	}
-	defer set.Close()
-
+	// Checked before opening: a dry run must be inspectable with no monitor
+	// attached, and opening one is itself a bus transaction.
 	if a.opts.DryRun {
 		a.printf("dry-run: set %s = %s\n", code, value)
 		return nil
 	}
 
-	landed, readback, err := m.SetVCPVerified(code, value, a.cfg.DDC.Settle.D())
+	p, err := a.openPanel()
+	if err != nil {
+		return err
+	}
+	defer p.Close()
+
+	landed, readback, err := p.SetVerified(code, value, a.cfg.DDC.Settle.D())
 	if err != nil {
 		return err
 	}
@@ -125,13 +127,15 @@ func (a *App) Set(args []string) error {
 
 // Level gets or sets a 0..max register such as brightness or volume.
 func (a *App) Level(args []string, code vcp.Code, label string) error {
-	set, m, err := a.openMonitor()
+	p, err := a.openPanel()
 	if err != nil {
 		return err
 	}
-	defer set.Close()
+	defer p.Close()
 
-	cur, err := m.GetVCP(code)
+	// Read even for a dry run: a relative argument is meaningless without the
+	// current level, and reporting the resolved target is the point.
+	cur, err := p.Get(code)
 	if err != nil {
 		return err
 	}
@@ -149,7 +153,7 @@ func (a *App) Level(args []string, code vcp.Code, label string) error {
 		return nil
 	}
 
-	landed, readback, err := m.SetVCPVerified(code, target, a.cfg.DDC.Settle.D())
+	landed, readback, err := p.SetVerified(code, target, a.cfg.DDC.Settle.D())
 	if err != nil {
 		return err
 	}
@@ -181,18 +185,18 @@ func resolveLevel(arg string, cur ddc.Reading) (vcp.Level, error) {
 
 // Mute writes the mute register. 1 mutes, 2 unmutes, per MCCS.
 func (a *App) Mute(value vcp.Level) error {
-	set, m, err := a.openMonitor()
-	if err != nil {
-		return err
-	}
-	defer set.Close()
-
 	if a.opts.DryRun {
 		a.printf("dry-run: mute = %d\n", value)
 		return nil
 	}
 
-	landed, readback, err := m.SetVCPVerified(a.cfg.Registers.Mute, value, a.cfg.DDC.Settle.D())
+	p, err := a.openPanel()
+	if err != nil {
+		return err
+	}
+	defer p.Close()
+
+	landed, readback, err := p.SetVerified(a.cfg.Registers.Mute, value, a.cfg.DDC.Settle.D())
 	if err != nil {
 		return err
 	}
@@ -233,13 +237,13 @@ func (a *App) Table(args []string, t config.Table, label string) error {
 		return nil
 	}
 
-	if set, m, err := a.openMonitor(); err == nil {
-		defer set.Close()
-		if err := m.SetVCP(t.VCP, mode); err == nil {
+	if p, err := a.openPanel(); err == nil {
+		defer p.Close()
+		if err := p.Set(t.VCP, mode); err == nil {
 			a.println("  sent via DDC")
 
 			time.Sleep(a.cfg.DDC.Settle.D())
-			if v, err := m.GetVCP(t.VCP); err == nil {
+			if v, err := p.Get(t.VCP); err == nil {
 				a.printf("  read back: %s\n", v.Current)
 			}
 			return nil

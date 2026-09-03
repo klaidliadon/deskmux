@@ -231,10 +231,10 @@ func (a *App) awaitVolumeReading(ctx context.Context) (ddc.Reading, error) {
 
 	delay := firstDelay
 	for attempt := 1; ; attempt++ {
-		set, monitor, err := a.openMonitor()
+		p, err := a.openPanel()
 		if err == nil {
-			reading, readErr := monitor.GetVCP(a.cfg.Registers.Volume)
-			set.Close()
+			reading, readErr := p.Get(a.cfg.Registers.Volume)
+			p.Close()
 			if readErr == nil {
 				if attempt > 1 {
 					a.log.Info("monitor is answering again", "attempts", attempt)
@@ -374,52 +374,51 @@ func (h *keyHook) stop() {
 // Destroy) costs tens of milliseconds and was the dominant source of input
 // lag when the keys felt sluggish.
 type volumeSession struct {
-	app *App
-	set *ddc.Set
-	mon ddc.Monitor
+	app   *App
+	panel Panel
 }
 
 func (s *volumeSession) open() error {
-	set, mon, err := s.app.openMonitor()
+	p, err := s.app.openPanel()
 	if err != nil {
 		return err
 	}
-	s.set, s.mon = set, mon
+	s.panel = p
 	return nil
 }
 
 func (s *volumeSession) close() {
-	if s.set != nil {
-		s.set.Close()
-		s.set = nil
+	if s.panel != nil {
+		s.panel.Close()
+		s.panel = nil
 	}
 }
 
-func (s *volumeSession) ready() bool { return s.set != nil }
+func (s *volumeSession) ready() bool { return s.panel != nil }
 
 // write reopens the handle once if it has gone stale, which happens whenever
 // the panel's DDC engine drops out and comes back.
 func (s *volumeSession) write(code vcp.Code, value vcp.Level) error {
-	if s.set == nil {
+	if s.panel == nil {
 		if err := s.open(); err != nil {
 			return err
 		}
 	}
-	if err := s.mon.SetVCPOnce(code, value); err != nil {
+	if err := s.panel.SetOnce(code, value); err != nil {
 		s.close()
 		if err := s.open(); err != nil {
 			return err
 		}
-		return s.mon.SetVCPOnce(code, value)
+		return s.panel.SetOnce(code, value)
 	}
 	return nil
 }
 
 func (s *volumeSession) read(code vcp.Code) (ddc.Reading, error) {
-	if s.set == nil {
+	if s.panel == nil {
 		return ddc.Reading{}, ddc.ErrNoMonitors
 	}
-	return s.mon.GetVCP(code)
+	return s.panel.Get(code)
 }
 
 // runVolumeWriter writes on the leading edge so a single key press is never
