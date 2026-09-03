@@ -216,6 +216,47 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+// A config file written before a field existed must keep that field's default.
+//
+// Every existing user has an on_dock block with no `wake` key, and the whole
+// point of the wake step is that it applies to them without an edit. Structs
+// merge field by field, so the default survives -- unlike the maps, which
+// replace by design. This pins the difference, since getting it wrong would
+// silently disable the feature for exactly the people it was written for.
+func TestPartialProfileKeepsNewFieldDefaults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	body := "watch:\n  on_dock:\n    input: usb-c\n    volume: -1\n    power_off: false\n"
+
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, _, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if !cfg.Watch.OnDock.Wake {
+		t.Error("on_dock.wake defaulted to false for a file that predates the field")
+	}
+	if cfg.Watch.OnUndock.Wake {
+		t.Error("on_undock.wake should stay false: the panel is on its way elsewhere")
+	}
+
+	// An explicit false must still win, or the setting is not a setting.
+	if err := os.WriteFile(path, []byte(
+		"watch:\n  on_dock:\n    input: usb-c\n    wake: false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err = Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Watch.OnDock.Wake {
+		t.Error("an explicit `wake: false` was ignored")
+	}
+}
+
 // Map iteration order is random, so validating aliases by ranging the map
 // reported a different broken alias on each run and made a deterministic
 // misconfiguration look intermittent.
