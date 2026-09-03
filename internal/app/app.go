@@ -13,7 +13,6 @@ import (
 	"io"
 	"log/slog"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/klaidliadon/deskmux/config"
@@ -147,12 +146,10 @@ func parseValue(s string) (vcp.Level, error) {
 func (a *App) sendRaw(source vcp.SourceAddr, code vcp.Code, value vcp.Level, label string) error {
 	pkt := nvapi.BuildSetVCP(source, code, value)
 
-	hex := make([]string, 0, len(pkt))
-	for _, b := range pkt {
-		hex = append(hex, fmt.Sprintf("%02X", b))
-	}
-	a.printf("%s\n  packet: %s   (source=%s code=%s value=%s)\n",
-		label, strings.Join(hex, " "), source, code, value)
+	// "% X" on a byte slice is exactly the wanted rendering: two upper-case
+	// hex digits per byte, single-space separated.
+	a.printf("%s\n  packet: % X   (source=%s code=%s value=%s)\n",
+		label, pkt, source, code, value)
 
 	if a.opts.DryRun {
 		a.println("  dry-run: nothing sent")
@@ -170,12 +167,10 @@ func (a *App) sendRaw(source vcp.SourceAddr, code vcp.Code, value vcp.Level, lab
 		return err
 	}
 
-	var accepted int
-	for _, at := range attempts {
-		if at.OK {
-			accepted++
-		}
-		if a.opts.Verbose {
+	accepted := nvapi.Accepted(attempts)
+
+	if a.opts.Verbose {
+		for _, at := range attempts {
 			port := "-"
 			if at.HasPort {
 				port = strconv.Itoa(at.Port)
@@ -225,11 +220,6 @@ func (a *App) setVolume(level vcp.Level) string {
 		return fmt.Sprintf("DDC unavailable and NVAPI failed: %v", err)
 	}
 
-	var accepted int
-	for _, at := range attempts {
-		if at.OK {
-			accepted++
-		}
-	}
-	return fmt.Sprintf("%d over NVAPI raw, %d/%d accepted, unverified", level, accepted, len(attempts))
+	return fmt.Sprintf("%d over NVAPI raw, %d/%d accepted, unverified",
+		level, nvapi.Accepted(attempts), len(attempts))
 }

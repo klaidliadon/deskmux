@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -212,6 +213,30 @@ func TestValidate(t *testing.T) {
 				t.Errorf("unexpected error: %v", err)
 			}
 		})
+	}
+}
+
+// Map iteration order is random, so validating aliases by ranging the map
+// reported a different broken alias on each run and made a deterministic
+// misconfiguration look intermittent.
+func TestValidateReportsTheSameAliasEveryTime(t *testing.T) {
+	cfg := Default()
+	for _, alias := range []string{"zebra", "alpha", "middle"} {
+		cfg.Inputs.Aliases[alias] = "nowhere"
+	}
+
+	first := cfg.Validate()
+	if first == nil {
+		t.Fatal("expected an error")
+	}
+
+	for range 50 {
+		if got := cfg.Validate(); got.Error() != first.Error() {
+			t.Fatalf("error varies between runs:\n %v\n %v", first, got)
+		}
+	}
+	if !strings.Contains(first.Error(), "alpha") {
+		t.Errorf("error %q should name the first alias in sorted order", first)
 	}
 }
 

@@ -109,6 +109,16 @@ func TestSplitMultiSz(t *testing.T) {
 		{"empty", []uint16{0}, nil},
 		{"one", encode("USB\\VID_1E91"), []string{"USB\\VID_1E91"}},
 		{"several", encode("A", "BB", "CCC"), []string{"A", "BB", "CCC"}},
+		{"nothing at all", nil, nil},
+
+		// An empty string is the list terminator, so anything past it is not
+		// part of the list even when the buffer still holds bytes.
+		{"stops at the terminator", append(encode("A"), 'X', 0, 0), []string{"A"}},
+
+		// A buffer with no terminator has no complete string in it. Trusting
+		// the trailing bytes would mean handing back whatever the driver left
+		// in the tail of the allocation.
+		{"unterminated", []uint16{'A', 'B'}, nil},
 	}
 
 	for _, tt := range tests {

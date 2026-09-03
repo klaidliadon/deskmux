@@ -14,6 +14,7 @@
 package nvapi
 
 import (
+	"bytes"
 	"fmt"
 	"runtime"
 	"sync"
@@ -186,11 +187,10 @@ func (c *Client) status(st uintptr) string {
 	return fmt.Sprintf("status %d", code)
 }
 
+// cString reads a NUL-terminated string out of a fixed-size buffer.
 func cString(b []byte) string {
-	for i, c := range b {
-		if c == 0 {
-			return string(b[:i])
-		}
+	if i := bytes.IndexByte(b, 0); i >= 0 {
+		return string(b[:i])
 	}
 	return string(b)
 }
@@ -222,6 +222,21 @@ type Attempt struct {
 	HasPort bool
 	OK      bool
 	Status  string
+}
+
+// Accepted counts the attempts the bus took.
+//
+// This is the only quantity Write's result really answers, and every caller
+// wants it, so it belongs here rather than being recounted at each call site.
+// It still says nothing about whether the monitor obeyed.
+func Accepted(attempts []Attempt) int {
+	var n int
+	for _, a := range attempts {
+		if a.OK {
+			n++
+		}
+	}
+	return n
 }
 
 // WriteOptions tunes how widely Write casts its net.

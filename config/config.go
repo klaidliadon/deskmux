@@ -321,7 +321,10 @@ func (c Config) Validate() error {
 	if c.Inputs.VCP == 0 {
 		return errors.New("inputs.vcp is unset")
 	}
-	for alias, target := range c.Inputs.Aliases {
+	// Sorted, not ranged: with several broken aliases, map order would report
+	// a different one on each run and make the failure look intermittent.
+	for _, alias := range slices.Sorted(maps.Keys(c.Inputs.Aliases)) {
+		target := c.Inputs.Aliases[alias]
 		if _, ok := c.Inputs.Targets[target]; !ok {
 			return fmt.Errorf("inputs.aliases[%q] points at %q, which is not in inputs.targets", alias, target)
 		}

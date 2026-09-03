@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -33,21 +34,20 @@ func presentDeviceIDs() ([]string, error) {
 }
 
 // splitMultiSz walks a double-null-terminated UTF-16 string list.
+//
+// An empty string ends the list, which is what the second NUL of the pair
+// looks like once the first has been consumed as a terminator. A buffer with
+// no terminator at all ends it too, since there is no complete string left.
 func splitMultiSz(b []uint16) []string {
 	var out []string
-	start := 0
 
-	for i := range b {
-		if b[i] != 0 {
-			continue
-		}
-		if i > start {
-			out = append(out, syscall.UTF16ToString(b[start:i]))
-		}
-		start = i + 1
-		if i+1 < len(b) && b[i+1] == 0 {
+	for len(b) > 0 {
+		end := slices.Index(b, 0)
+		if end <= 0 {
 			break
 		}
+		out = append(out, syscall.UTF16ToString(b[:end]))
+		b = b[end+1:]
 	}
 	return out
 }
@@ -103,20 +103,18 @@ func (a *App) Devices(args []string) error {
 		return err
 	}
 
-	var filter string
+	total := len(ids)
 	if len(args) == 1 {
-		filter = strings.ToUpper(args[0])
+		filter := strings.ToUpper(args[0])
+		ids = slices.DeleteFunc(ids, func(id string) bool {
+			return !strings.Contains(strings.ToUpper(id), filter)
+		})
 	}
 
-	var shown int
 	for _, id := range ids {
-		if filter != "" && !strings.Contains(strings.ToUpper(id), filter) {
-			continue
-		}
 		a.println(id)
-		shown++
 	}
 
-	a.printf("\n%d of %d present devices shown\n", shown, len(ids))
+	a.printf("\n%d of %d present devices shown\n", len(ids), total)
 	return nil
 }
