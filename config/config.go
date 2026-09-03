@@ -22,10 +22,14 @@ import (
 // YAML, which yaml.v3 does not support natively.
 type Duration time.Duration
 
+// D returns the underlying time.Duration.
 func (d Duration) D() time.Duration { return time.Duration(d) }
 
+// MarshalYAML writes the duration back as a string such as "250ms".
 func (d Duration) MarshalYAML() (any, error) { return time.Duration(d).String(), nil }
 
+// UnmarshalYAML accepts a duration string. A bare number is rejected: it
+// would silently be read as nanoseconds.
 func (d *Duration) UnmarshalYAML(node *yaml.Node) error {
 	var s string
 	if err := node.Decode(&s); err != nil {
@@ -107,10 +111,16 @@ type Profile struct {
 type Watch struct {
 	// Match lists device-ID substrings that identify the dock. Find them
 	// with `deskmux devices <substring>`.
-	Match    []string `yaml:"match"`
-	Poll     Duration `yaml:"poll"`
-	OnDock   Profile  `yaml:"on_dock"`
-	OnUndock Profile  `yaml:"on_undock"`
+	Match []string `yaml:"match"`
+	Poll  Duration `yaml:"poll"`
+
+	// Debounce is how many consecutive polls a reading must hold before it
+	// counts as a change. Device arrival enumerates as a burst as each
+	// function of a dock appears, so acting on the first sighting races the
+	// rest. Raise it if a flaky dock triggers spurious switches.
+	Debounce int     `yaml:"debounce"`
+	OnDock   Profile `yaml:"on_dock"`
+	OnUndock Profile `yaml:"on_undock"`
 }
 
 // VolumeKeys configures volume-key interception.
@@ -174,6 +184,7 @@ func Default() Config {
 		Watch: Watch{
 			Match:    []string{"VID_1E91", "VEN_OWC_TB3", "SUBSYS_00191C7A"},
 			Poll:     Duration(2 * time.Second),
+			Debounce: 2,
 			OnDock:   Profile{Input: "usb-c", Volume: -1},
 			OnUndock: Profile{Input: "dp", Volume: -1},
 		},
@@ -257,6 +268,9 @@ func (c Config) Validate() error {
 		if _, ok := c.Inputs.Targets[target]; !ok {
 			return fmt.Errorf("inputs.aliases[%q] points at %q, which is not in inputs.targets", alias, target)
 		}
+	}
+	if c.Watch.Debounce < 1 {
+		return fmt.Errorf("watch.debounce must be at least 1, got %d", c.Watch.Debounce)
 	}
 	if c.VolumeKeys.Step <= 0 {
 		return fmt.Errorf("volume_keys.step must be positive, got %d", c.VolumeKeys.Step)

@@ -44,14 +44,17 @@ linters:
             # style guide, which var-naming would otherwise flag.
             - - upperCaseConst: true
 
-  exclusions:
-    rules:
-      # Syscall wrappers legitimately ignore return values from calls whose
-      # only failure mode is "the handle was already gone".
-      - path: (winaudio|internal/app)/.*\.go
-        linters:
-          - errcheck
-        text: "Call$"
+    errcheck:
+      # These do not report failure through their error return.
+      #
+      # LazyProc.Call and SyscallN always hand back the thread's last Win32
+      # error, set or not, so it is meaningless unless the primary return
+      # value already indicated failure. Checking it would be actively wrong:
+      # a successful call routinely returns a stale non-nil error. Every site
+      # that can fail meaningfully inspects the primary return instead.
+      exclude-functions:
+        - (*syscall.LazyProc).Call
+        - syscall.SyscallN
 
 formatters:
   enable:

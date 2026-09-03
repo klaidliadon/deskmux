@@ -46,8 +46,8 @@ func New(cfg config.Config, logger *slog.Logger, out io.Writer, opts Options) *A
 }
 
 // printf writes program output. Diagnostics go through a.log instead.
-func (a *App) printf(format string, args ...any) { fmt.Fprintf(a.out, format, args...) }
-func (a *App) println(args ...any)               { fmt.Fprintln(a.out, args...) }
+func (a *App) printf(format string, args ...any) { _, _ = fmt.Fprintf(a.out, format, args...) }
+func (a *App) println(args ...any)               { _, _ = fmt.Fprintln(a.out, args...) }
 
 // ErrUsage asks the caller to print usage.
 var ErrUsage = errors.New("no command given")

@@ -76,6 +76,8 @@ watch:
     - VEN_OWC_TB3       # its card reader
     - SUBSYS_00191C7A   # its Intel I210 ethernet
   poll: 2s
+  debounce: 2           # consecutive polls a reading must hold; docks
+                        # enumerate as a burst, so 1 would race the rest
   on_dock:
     input: usb-c
     volume: -1

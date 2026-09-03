@@ -48,7 +48,7 @@ func (a *App) Watch(ctx context.Context) error {
 	ticker := time.NewTicker(a.cfg.Watch.Poll.D())
 	defer ticker.Stop()
 
-	debounce := newDebouncer(present, _stableReads)
+	debounce := newDebouncer(present, a.cfg.Watch.Debounce)
 
 	for {
 		select {
@@ -76,10 +76,6 @@ func (a *App) Watch(ctx context.Context) error {
 		}
 	}
 }
-
-// Device arrival enumerates as a burst as each function of a dock appears, so
-// a reading has to hold before it is believed.
-const _stableReads = 2
 
 // debouncer reports a state change only once a new reading has held for a
 // number of consecutive observations.

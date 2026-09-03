@@ -179,7 +179,7 @@ func newLogger(cfg config.Log) (*slog.Logger, func(), error) {
 		if err != nil {
 			return nil, nil, fmt.Errorf("open log file %s: %w", cfg.File, err)
 		}
-		closeLog = func() { f.Close() }
+		closeLog = func() { _ = f.Close() }
 		sink = io.MultiWriter(os.Stderr, f)
 	}
 

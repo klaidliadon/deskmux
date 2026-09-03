@@ -54,6 +54,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
+      # Run the linter the same way the Makefile does, rather than through
+      # the action. golangci-lint-action@v6 installs the latest v1, which is
+      # built against go1.24 and refuses a go.mod targeting 1.25 -- and this
+      # repository's .golangci.yml is v2 schema, which v1 cannot parse at all.
+      - name: Lint
+        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run

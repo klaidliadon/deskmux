@@ -176,12 +176,16 @@ func cString(b []byte) string {
 // The destination address is not in the buffer but is folded into the
 // checksum.
 func BuildSetVCP(source vcp.SourceAddr, code vcp.Code, value vcp.Level) []byte {
-	pkt := []byte{byte(source), 0x84, 0x03, byte(code), byte(value >> 8), byte(value)}
+	pkt := make([]byte, 7)
+	copy(pkt, []byte{byte(source), 0x84, 0x03, byte(code), byte(value >> 8), byte(value)})
+
 	checksum := vcp.DeviceAddr
-	for _, b := range pkt {
+	for _, b := range pkt[:6] {
 		checksum ^= b
 	}
-	return append(pkt, checksum)
+	pkt[6] = checksum
+
+	return pkt
 }
 
 // Attempt records one (gpu, mask, port) write.

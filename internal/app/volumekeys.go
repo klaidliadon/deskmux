@@ -614,7 +614,8 @@ func singleInstance(name string) (release func(), err error) {
 	if handle == 0 {
 		return nil, fmt.Errorf("CreateMutex: %w", lastErr)
 	}
-	if errno, ok := lastErr.(syscall.Errno); ok && errno == _errorAlreadyExists {
+	var errno syscall.Errno
+	if errors.As(lastErr, &errno) && errno == _errorAlreadyExists {
 		_closeHandle.Call(handle)
 		return nil, ErrAlreadyRunning
 	}

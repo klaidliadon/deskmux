@@ -268,11 +268,11 @@ func (d *Device) PinToMax() (before float32, err error) {
 		}
 
 		for range maxSteps {
-			v, err := read()
-			if err != nil {
-				return err
+			level, levelErr := read()
+			if levelErr != nil {
+				return levelErr
 			}
-			if v >= 0.999 {
+			if level >= 0.999 {
 				return nil
 			}
 			if hr := call(vol, _slotVolumeStepUp, 0); failed(hr) {
