@@ -74,15 +74,15 @@ changelog:
 #   scoop bucket add klaidliadon https://github.com/klaidliadon/scoop-bucket
 #   scoop install deskmux
 #
-# Two prerequisites, both outside this file:
+# This repository is its own bucket: scoop reads manifests from a bucket/
+# directory, and goreleaser writes one there. That avoids a second repository
+# and, more usefully, avoids a personal access token -- the workflow's
+# built-in GITHUB_TOKEN can write to its own repository but not to another
+# one, which is the only reason a separate bucket needs a credential.
 #
-#   1. A SCOOP_BUCKET_TOKEN secret holding a token that can push to the
-#      bucket repo. The workflow's built-in GITHUB_TOKEN is scoped to this
-#      repository alone and cannot write to another one.
-#
-#   2. The release assets must be publicly downloadable. Scoop fetches the
-#      zip anonymously, so a private release 404s for it exactly as it would
-#      for a stranger.
+# The one remaining prerequisite is that release assets be publicly
+# downloadable: scoop fetches the zip anonymously, so a private release 404s
+# for it exactly as it would for a stranger.
 #
 # winget is a larger commitment: it opens a pull request against
 # microsoft/winget-pkgs and goes through their review, needs a publicly
@@ -94,9 +94,8 @@ scoops:
       - default
     repository:
       owner: klaidliadon
-      name: scoop-bucket
+      name: deskmux
       branch: main
-      token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
     directory: bucket
     homepage: https://github.com/klaidliadon/deskmux
     description: DDC/CI monitor control for Windows, including input switching on LG panels that ignore VCP 0x60

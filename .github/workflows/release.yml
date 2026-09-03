@@ -35,8 +35,4 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Pushing the scoop manifest goes to a different repository, which
-          # GITHUB_TOKEN has no rights to. Create this secret before tagging,
-          # or the release will fail at the scoop step with the artifacts
-          # already published.
-          SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+

@@ -50,7 +50,7 @@ they all issue the same `SetVCPFeature` call.
 With [scoop](https://scoop.sh):
 
 ```bash
-scoop bucket add klaidliadon https://github.com/klaidliadon/scoop-bucket
+scoop bucket add deskmux https://github.com/klaidliadon/deskmux
 scoop install deskmux
 ```
 
