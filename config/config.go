@@ -9,8 +9,11 @@ package config
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -304,18 +307,10 @@ func (c Config) ResolveInput(name string) (vcp.Level, error) {
 }
 
 func joinKeys[V any](m map[string]V) string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	if len(keys) == 0 {
+	if len(m) == 0 {
 		return "none"
 	}
-	out := keys[0]
-	for _, k := range keys[1:] {
-		out += ", " + k
-	}
-	return out
+	return strings.Join(slices.Sorted(maps.Keys(m)), ", ")
 }
 
 // WriteTemplate writes the documented starter configuration to path,

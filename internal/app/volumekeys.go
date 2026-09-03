@@ -176,25 +176,11 @@ func (a *App) VolumeKeys(ctx context.Context) error {
 		active atomic.Bool
 	)
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		a.runVolumeWriter(ctx, state)
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		a.newDeviceTracker(&active).run(ctx)
-	}()
+	wg.Go(func() { a.runVolumeWriter(ctx, state) })
+	wg.Go(func() { a.newDeviceTracker(&active).run(ctx) })
 
 	hook := newKeyHook(state, &active, cfg.Step)
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		hook.run()
-	}()
+	wg.Go(hook.run)
 
 	// The hook thread parks in GetMessage, which returns only when a message
 	// arrives, so shutdown must post WM_QUIT to it. Taking ctx.Done() without
@@ -614,8 +600,7 @@ func singleInstance(name string) (release func(), err error) {
 	if handle == 0 {
 		return nil, fmt.Errorf("CreateMutex: %w", lastErr)
 	}
-	var errno syscall.Errno
-	if errors.As(lastErr, &errno) && errno == _errorAlreadyExists {
+	if errno, ok := errors.AsType[syscall.Errno](lastErr); ok && errno == _errorAlreadyExists {
 		_closeHandle.Call(handle)
 		return nil, ErrAlreadyRunning
 	}

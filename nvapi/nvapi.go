@@ -71,18 +71,11 @@ type Client struct {
 
 // NVAPI initialisation is process-wide and idempotent, and LoadLibrary leaks
 // a module reference per call, so resolve once and reuse.
-var (
-	_once   sync.Once
-	_client *Client
-	_err    error
-)
+var _load = sync.OnceValues(newClient)
 
 // Load resolves NVAPI and enumerates GPUs. Safe to call repeatedly; the work
 // happens once.
-func Load() (*Client, error) {
-	_once.Do(func() { _client, _err = newClient() })
-	return _client, _err
-}
+func Load() (*Client, error) { return _load() }
 
 func newClient() (*Client, error) {
 	lib, err := syscall.LoadLibrary("nvapi64.dll")

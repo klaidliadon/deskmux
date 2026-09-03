@@ -128,7 +128,7 @@ func (a *App) serviceStatus() error {
 		}
 
 		status := "unknown"
-		for _, l := range strings.Split(out, "\n") {
+		for l := range strings.SplitSeq(out, "\n") {
 			if name, value, ok := strings.Cut(l, ":"); ok && strings.TrimSpace(name) == "Status" {
 				status = strings.TrimSpace(value)
 			}

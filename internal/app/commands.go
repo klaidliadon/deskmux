@@ -3,9 +3,10 @@ package app
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -316,10 +317,5 @@ func defaultConfigPath() string {
 }
 
 func joinSorted[V any](m map[string]V) string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return strings.Join(keys, " | ")
+	return strings.Join(slices.Sorted(maps.Keys(m)), " | ")
 }
