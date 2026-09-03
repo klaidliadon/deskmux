@@ -161,8 +161,11 @@ consult the [ddcutil LG value table][ddcutil] for your model. `raw` lets you
 try a code and source address without editing anything.
 
 A partial config overlays onto the defaults, so you only write what differs.
-Note that maps *merge* rather than replace: adding one entry to
-`inputs.targets` keeps the built-in ones alongside it.
+Maps replace rather than merge: if you define `inputs.targets` at all, yours
+are the only ones — the built-ins do not survive alongside, so a monitor whose
+values differ does not silently keep the wrong ones. Unknown keys are an error
+rather than being ignored, so a typo tells you instead of quietly leaving the
+default in place.
 
 ## Known issues and caveats
 
