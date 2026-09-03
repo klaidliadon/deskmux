@@ -236,9 +236,12 @@ binary derives its own version from Go's embedded VCS build info, so
 `go build` alone produces an identifiable binary:
 
 ```
-$ deskmux version
-deskmux v0.0.0-20260902224239-ba387ed2ce87+dirty (windows/amd64, go1.27.1)
+$ go build -o deskmux.exe ./cmd/deskmux && deskmux version
+deskmux v0.2.1-0.20260903091345-3783ab284ee9 (windows/amd64, go1.27.1)
 ```
+
+(`go run` does not stamp the module version, so it reports `devel`. Build the
+binary when you want an identifiable one.)
 
 Stamp a release with `make build VERSION=v1.2.3`.
 
