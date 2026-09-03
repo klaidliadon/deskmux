@@ -180,7 +180,17 @@ func newLogger(cfg config.Log) (*slog.Logger, func(), error) {
 			return nil, nil, fmt.Errorf("open log file %s: %w", cfg.File, err)
 		}
 		closeLog = func() { _ = f.Close() }
-		sink = io.MultiWriter(os.Stderr, f)
+
+		// Only tee to stderr when there is a stderr worth writing to.
+		//
+		// The windowless build has no console, so os.Stderr is not a usable
+		// handle. io.MultiWriter returns on the first write error, so
+		// including a broken stderr silently discarded every log line -- in
+		// exactly the configuration the daemons are meant to run in.
+		sink = f
+		if hasUsableStderr() {
+			sink = io.MultiWriter(f, os.Stderr)
+		}
 	}
 
 	opts := &slog.HandlerOptions{Level: level}
@@ -190,6 +200,16 @@ func newLogger(cfg config.Log) (*slog.Logger, func(), error) {
 		handler = slog.NewJSONHandler(sink, opts)
 	}
 	return slog.New(handler), closeLog, nil
+}
+
+// hasUsableStderr reports whether stderr can actually be written to. It
+// cannot in a GUI-subsystem process launched without a console.
+func hasUsableStderr() bool {
+	if os.Stderr == nil {
+		return false
+	}
+	_, err := os.Stderr.Stat()
+	return err == nil
 }
 
 func usage() {
