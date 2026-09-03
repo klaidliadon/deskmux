@@ -6,3 +6,6 @@
 
 # local configuration (the template lives in config/template.go)
 deskmux.yaml
+
+# generated Windows version resource (make winres)
+cmd/deskmux/*.syso

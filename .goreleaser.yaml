@@ -1,0 +1,108 @@
+# Release configuration.
+#
+# Windows amd64 only, and that is not an oversight: the whole module is
+# Windows-only (dxva2, NVAPI, Core Audio, Win32 hooks), NVAPI ships as
+# nvapi64.dll, and the version resource is compiled for amd64. A linux or
+# arm64 artefact would not build, let alone run.
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    # Compile the VERSIONINFO resource so the published binaries have their
+    # file properties filled in. The linker picks the .syso up automatically
+    # from the main package directory.
+    - go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest -o cmd/deskmux/resource_windows_amd64.syso versioninfo.json
+
+builds:
+  - id: console
+    main: ./cmd/deskmux
+    binary: deskmux
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+    goarch:
+      - amd64
+    ldflags:
+      - -X main.version={{ .Version }}
+
+  # Same program, no console window, for running as a logon task. Pair it
+  # with -log: without a console there is nowhere for output to go.
+  - id: windowless
+    main: ./cmd/deskmux
+    binary: deskmuxw
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - windows
+    goarch:
+      - amd64
+    ldflags:
+      - -X main.version={{ .Version }}
+      - -H=windowsgui
+
+archives:
+  - id: default
+    ids:
+      - console
+      - windowless
+    formats:
+      - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+# Package-manager publishing, for when this repository becomes public.
+#
+# Both scoop and winget install by downloading the release asset, so neither
+# can work while the repository is private -- the download URL 404s for
+# anyone without access, including the package manager itself.
+#
+# Scoop, once public:
+#   1. Create a public repo named scoop-bucket.
+#   2. Add a SCOOP_BUCKET_TOKEN secret with a PAT that can push to it. The
+#      built-in GITHUB_TOKEN only has rights to this repository.
+#   3. Uncomment the block below and tag a release.
+#   4. Users then run:
+#        scoop bucket add klaidliadon https://github.com/klaidliadon/scoop-bucket
+#        scoop install deskmux
+#
+# scoops:
+#   - repository:
+#       owner: klaidliadon
+#       name: scoop-bucket
+#       token: "{{ .Env.SCOOP_BUCKET_TOKEN }}"
+#     homepage: https://github.com/klaidliadon/deskmux
+#     description: DDC/CI monitor control for Windows, including LG sidechannel input switching
+#     license: MIT
+#
+# winget is a larger commitment: it opens a pull request against
+# microsoft/winget-pkgs and goes through their review, needs a publicly
+# reachable asset, and expects a stable publisher identity. Worth doing only
+# once the tool has users. goreleaser supports it via a `winget:` block.
+
+release:
+  draft: false
+  # Tags like v0.1.0-rc1 publish as pre-releases automatically.
+  prerelease: auto
+  footer: |
+    ## Install
+
+    Download the zip, extract `deskmux.exe`, and run `deskmux config init`.
+
+    Input switching needs an NVIDIA GPU driving the monitor; everything else
+    works on any GPU. No admin rights required.

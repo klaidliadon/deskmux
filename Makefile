@@ -16,6 +16,13 @@ PKG    := ./cmd/deskmux
 VERSION ?=
 
 GOLANGCI_VERSION ?= latest
+GOVERSIONINFO_VERSION ?= latest
+
+# Windows executables carry their metadata in a VERSIONINFO resource, which Go
+# does not emit. goversioninfo compiles versioninfo.json into a .syso that the
+# linker picks up automatically from the main package directory. Without it the
+# Details tab of the file properties is blank.
+SYSO := cmd/deskmux/resource_windows_amd64.syso
 
 # An empty VERSION yields -X main.version=, which the linker accepts and the
 # binary reads as "fall back to VCS build info".
@@ -29,23 +36,40 @@ else
 	RM  := rm -f
 endif
 
+# The version resource is Windows-only; elsewhere the build needs no
+# prerequisite.
+ifeq ($(OS),Windows_NT)
+	RES := $(SYSO)
+else
+	RES :=
+endif
+
 BIN     := $(BINARY)$(EXE)
 BIN_GUI := $(BINARY)w$(EXE)
 
 .DEFAULT_GOAL := build
-.PHONY: build gui all test cover bench lint fmt vet tidy check clean install \
+.PHONY: build gui winres all test cover bench lint fmt vet tidy check clean install \
         service service-install service-uninstall service-status \
         watch volumekeys probe config version help
 
+## winres: compile the Windows version resource
+##
+## Regenerated only when versioninfo.json changes. Bump the numbers there for
+## a release; the `version` command reports the VCS revision separately.
+$(SYSO): versioninfo.json
+	go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@$(GOVERSIONINFO_VERSION) -o $(SYSO) versioninfo.json
+
+winres: $(SYSO)
+
 ## build: compile the console binary
-build:
+build: $(RES)
 	go build -ldflags "$(STAMP)" -o $(BIN) $(PKG)
 
 ## gui: compile a windowless binary, for running as a background task
 ##
 ## Pair it with a log file: with no console there is nowhere for stdout to go
 ## and no way to deliver Ctrl+C.
-gui:
+gui: $(RES)
 	go build -ldflags "$(STAMP) -H=windowsgui" -o $(BIN_GUI) $(PKG)
 
 ## all: build both binaries
@@ -120,6 +144,7 @@ clean:
 	-$(RM) $(BIN)
 	-$(RM) $(BIN_GUI)
 	-$(RM) coverage.out
+	-$(RM) $(SYSO)
 	go clean
 
 ## watch: run the dock watcher
