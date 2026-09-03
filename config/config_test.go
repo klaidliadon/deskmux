@@ -224,36 +224,42 @@ func TestValidate(t *testing.T) {
 // replace by design. This pins the difference, since getting it wrong would
 // silently disable the feature for exactly the people it was written for.
 func TestPartialProfileKeepsNewFieldDefaults(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	body := "watch:\n  on_dock:\n    input: usb-c\n    volume: -1\n    power_off: false\n"
-
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{
+			"a file predating the field keeps the default",
+			"watch:\n  on_dock:\n    input: usb-c\n    volume: -1\n    power_off: false\n",
+			true,
+		},
+		{
+			// Otherwise the setting is not a setting.
+			"an explicit false still wins",
+			"watch:\n  on_dock:\n    input: usb-c\n    wake: false\n",
+			false,
+		},
 	}
 
-	cfg, _, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tt.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
 
-	if !cfg.Watch.OnDock.Wake {
-		t.Error("on_dock.wake defaulted to false for a file that predates the field")
-	}
-	if cfg.Watch.OnUndock.Wake {
-		t.Error("on_undock.wake should stay false: the panel is on its way elsewhere")
-	}
-
-	// An explicit false must still win, or the setting is not a setting.
-	if err := os.WriteFile(path, []byte(
-		"watch:\n  on_dock:\n    input: usb-c\n    wake: false\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, _, err = Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.Watch.OnDock.Wake {
-		t.Error("an explicit `wake: false` was ignored")
+			cfg, _, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.Watch.OnDock.Wake != tt.want {
+				t.Errorf("on_dock.wake = %v, want %v", cfg.Watch.OnDock.Wake, tt.want)
+			}
+			if cfg.Watch.OnUndock.Wake {
+				t.Error("on_undock.wake should stay false: the panel is on its way elsewhere")
+			}
+		})
 	}
 }
 
