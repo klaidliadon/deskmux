@@ -187,9 +187,22 @@ func (a *App) sendRaw(source vcp.SourceAddr, code vcp.Code, value vcp.Level, lab
 		"accepted", accepted, "attempts", len(attempts))
 
 	a.printf("  %d/%d writes accepted by the bus\n", accepted, len(attempts))
+
+	// Nothing even attempted is a different failure from everything rejected,
+	// and the two used to share one message. No attempts means NVAPI reported
+	// no connected outputs, so there was no bus to write to -- which on a
+	// hybrid laptop is a state the machine enters by itself: when the discrete
+	// GPU parks, the mux hands the panel to the integrated one and NVAPI stops
+	// seeing it, with the display still lit and working the whole time.
+	if len(attempts) == 0 {
+		return errors.New("no NVIDIA GPU reports a connected output, so there was no bus to write to; " +
+			"on a hybrid laptop the display moves to the integrated GPU when the discrete one powers down " +
+			"(nvidia-smi --query-gpu=display_active --format=csv reports which)")
+	}
 	if accepted == 0 {
 		return errors.New("every I2C write was rejected; is the monitor on the NVIDIA GPU?")
 	}
+
 	a.println("  this channel never acknowledges -- confirm by looking at the screen")
 	return nil
 }

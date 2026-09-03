@@ -45,6 +45,20 @@ they all issue the same `SetVCPFeature` call.
   uses the standard API and works on any GPU.
 - No admin rights.
 
+On a hybrid-graphics laptop, "driving the monitor" is not a fixed property.
+When the discrete GPU parks, the mux hands the panel to the integrated GPU;
+NVAPI then reports no connected outputs and `input` fails with `0/0` while the
+display stays lit and working throughout. Observed here after ~2½ hours idle.
+Check with:
+
+```bash
+nvidia-smi --query-gpu=name,display_active,pstate --format=csv
+```
+
+`display_active: Disabled` with `pstate: P8` means the panel is on the
+integrated GPU and input switching is unavailable until the discrete GPU takes
+it back.
+
 ## Install
 
 With [scoop](https://scoop.sh):

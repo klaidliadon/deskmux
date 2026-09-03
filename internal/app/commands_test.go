@@ -127,6 +127,44 @@ func TestInputSucceedsOnPartialAcceptance(t *testing.T) {
 	}
 }
 
+// Nothing attempted is not the same as everything rejected. Observed live: a
+// hybrid laptop parked its discrete GPU after hours idle and the mux handed
+// the panel to the integrated one, so NVAPI reported no connected outputs at
+// all while the display stayed lit and working.
+func TestInputDistinguishesNoBusFromRejection(t *testing.T) {
+	t.Run("no connected outputs", func(t *testing.T) {
+		a, _, bus, out := newFakeApp(t, liveOpts())
+		bus.accepted, bus.total = 0, 0
+
+		err := a.Input([]string{"dp"})
+		if err == nil {
+			t.Fatal("expected an error")
+		}
+		if !strings.Contains(err.Error(), "no bus to write to") {
+			t.Errorf("error %q should say there was no bus", err)
+		}
+		if strings.Contains(err.Error(), "rejected") {
+			t.Errorf("error %q blames rejection, but nothing was attempted", err)
+		}
+		if got := out.String(); !strings.Contains(got, "0/0 writes accepted") {
+			t.Errorf("output should show 0/0:\n%s", got)
+		}
+	})
+
+	t.Run("attempted and rejected", func(t *testing.T) {
+		a, _, bus, _ := newFakeApp(t, liveOpts())
+		bus.accepted, bus.total = 0, 19
+
+		err := a.Input([]string{"dp"})
+		if err == nil {
+			t.Fatal("expected an error")
+		}
+		if !strings.Contains(err.Error(), "rejected") {
+			t.Errorf("error %q should say the writes were rejected", err)
+		}
+	})
+}
+
 func TestInputReportsBusFailure(t *testing.T) {
 	a, _, bus, _ := newFakeApp(t, liveOpts())
 	bus.err = errors.New("load nvapi64.dll: not found")
