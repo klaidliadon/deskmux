@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/klaidliadon/deskmux/config"
 	"github.com/klaidliadon/deskmux/ddc"
@@ -27,7 +28,18 @@ func newFakeApp(t *testing.T, opts Options) (*App, *fakeOpener, *fakeBus, *bytes
 	bus := newFakeBus()
 	a.panels, a.bus = opener, bus
 
+	// Never synthesise real input events from a test.
+	a.wake = func() (time.Duration, error) { return 0, nil }
+
 	return a, opener, bus, &out
+}
+
+// countingWaker records calls and can be made to fail.
+func countingWaker(n *int, err error) func() (time.Duration, error) {
+	return func() (time.Duration, error) {
+		*n++
+		return 90 * time.Second, err
+	}
 }
 
 func liveOpts() Options { return Options{Monitor: -1} }
@@ -583,6 +595,129 @@ func TestApplyProfileDryRunTouchesNothing(t *testing.T) {
 	}
 	if len(bus.packets) != 0 {
 		t.Errorf("dry run put %d packets on the bus", len(bus.packets))
+	}
+}
+
+// --- wake --------------------------------------------------------------
+
+// The panel stays lit on the other machine while Windows blanks its own
+// output, so claiming the panel without waking lands on a dead input. This is
+// the step that makes a dock arriving after the display timeout work at all.
+func TestApplyProfileWakesBeforeSwitchingInput(t *testing.T) {
+	a, _, bus, _ := newFakeApp(t, liveOpts())
+
+	var wakes int
+	a.wake = func() (time.Duration, error) {
+		wakes++
+		if len(bus.packets) != 0 {
+			t.Error("the input switch went out before the display was woken")
+		}
+		return 90 * time.Second, nil
+	}
+
+	a.applyProfile(config.Profile{Input: "usb-c", Volume: -1, Wake: true}, "dock")
+
+	if wakes != 1 {
+		t.Errorf("wakes = %d, want 1", wakes)
+	}
+	if len(bus.packets) != 1 {
+		t.Errorf("bus saw %d packets, want the input switch", len(bus.packets))
+	}
+}
+
+// Handing the panel away must not keep this machine awake.
+func TestApplyProfileDoesNotWakeWhenNotAsked(t *testing.T) {
+	a, _, _, _ := newFakeApp(t, liveOpts())
+
+	var wakes int
+	a.wake = countingWaker(&wakes, nil)
+
+	a.applyProfile(config.Profile{Input: "dp", Volume: -1}, "undock")
+
+	if wakes != 0 {
+		t.Errorf("wakes = %d, want 0 for a profile that does not ask", wakes)
+	}
+}
+
+// A wake that fails must not suppress the handover: the input switch is still
+// worth making and the user can nudge the mouse themselves.
+func TestApplyProfileSwitchesInputEvenIfWakeFails(t *testing.T) {
+	a, _, bus, _ := newFakeApp(t, liveOpts())
+	a.wake = countingWaker(new(int), errors.New("GetLastInputInfo failed"))
+
+	a.applyProfile(config.Profile{Input: "usb-c", Volume: -1, Wake: true}, "dock")
+
+	if len(bus.packets) != 1 {
+		t.Error("a failed wake suppressed the input switch")
+	}
+}
+
+func TestApplyProfileDryRunDoesNotWake(t *testing.T) {
+	a, _, _, _ := newFakeApp(t, Options{Monitor: -1, DryRun: true})
+
+	var wakes int
+	a.wake = countingWaker(&wakes, nil)
+
+	a.applyProfile(config.Profile{Input: "usb-c", Volume: -1, Wake: true}, "dock")
+
+	if wakes != 0 {
+		t.Errorf("dry run woke the display %d times", wakes)
+	}
+}
+
+func TestWakeCommand(t *testing.T) {
+	a, _, _, out := newFakeApp(t, liveOpts())
+
+	var wakes int
+	a.wake = countingWaker(&wakes, nil)
+
+	if err := a.Wake(); err != nil {
+		t.Fatalf("Wake: %v", err)
+	}
+	if wakes != 1 {
+		t.Errorf("wakes = %d, want 1", wakes)
+	}
+	if want := "display woken (idle for 1m30s)"; !strings.Contains(out.String(), want) {
+		t.Errorf("got %q, want it to contain %q", out.String(), want)
+	}
+}
+
+func TestWakeCommandDryRun(t *testing.T) {
+	a, _, _, out := newFakeApp(t, Options{Monitor: -1, DryRun: true})
+
+	var wakes int
+	a.wake = countingWaker(&wakes, nil)
+
+	if err := a.Wake(); err != nil {
+		t.Fatalf("Wake: %v", err)
+	}
+	if wakes != 0 {
+		t.Error("dry run woke the display")
+	}
+	if !strings.Contains(out.String(), "dry-run") {
+		t.Errorf("unexpected output: %s", out.String())
+	}
+}
+
+func TestWakeCommandPropagatesFailure(t *testing.T) {
+	a, _, _, _ := newFakeApp(t, liveOpts())
+	a.wake = countingWaker(new(int), errors.New("GetLastInputInfo failed"))
+
+	if err := a.Wake(); err == nil {
+		t.Fatal("a failing wake should surface as an error from the command")
+	}
+}
+
+// idleTime talks to the real OS. It cannot assert a value, but it can assert
+// that the call succeeds and returns something sane, which is what catches a
+// wrong struct size or a missing export.
+func TestIdleTimeIsPlausible(t *testing.T) {
+	idle, err := idleTime()
+	if err != nil {
+		t.Fatalf("idleTime: %v", err)
+	}
+	if idle < 0 || idle > 49*24*time.Hour {
+		t.Errorf("idle = %s, outside the range GetTickCount can express", idle)
 	}
 }
 

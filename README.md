@@ -96,6 +96,7 @@ deskmux input usb-c      # switch
 | `mute` / `unmute` | Monitor audio mute |
 | `pbp <mode>` | Picture-by-picture |
 | `power <on\|off>` | Monitor power |
+| `wake` | Wake this machine's own display output |
 
 **Diagnostics**
 
@@ -135,6 +136,14 @@ because a new one appears**, so the panel's own "auto input switch" setting
 cannot perform this handover while the first machine is still driving it.
 Pushing early works because a panel will happily sit on an input that has no
 signal yet.
+
+The connect profile also wakes this machine's own output first (`wake: true`).
+Windows blanks its output after the display timeout — five minutes by default —
+while the panel stays lit showing the other machine. Claiming the panel in that
+state selects an input carrying no signal, so a handover that worked perfectly
+looks like it did nothing. The disconnect profile deliberately does not wake:
+the panel is on its way elsewhere, and waking would only stop this machine
+sleeping.
 
 ## Configuration
 

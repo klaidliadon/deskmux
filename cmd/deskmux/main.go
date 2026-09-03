@@ -228,6 +228,7 @@ control:
   mute | unmute           monitor audio mute
   pbp <mode>              picture-by-picture
   power <on|off>          monitor power
+  wake                    wake this machine's own display output
 
 diagnostics:
   probe                   read every configured register, plus capabilities

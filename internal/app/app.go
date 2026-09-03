@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/klaidliadon/deskmux/config"
 	"github.com/klaidliadon/deskmux/nvapi"
@@ -43,6 +44,11 @@ type App struct {
 	// exactly one real backend.
 	panels Opener
 	bus    Bus
+
+	// wake turns this machine's own display output back on. A field rather
+	// than a direct call so tests can observe it without synthesising real
+	// input events on the developer's desktop.
+	wake func() (time.Duration, error)
 }
 
 // New builds an App. out receives command results, which are program output
@@ -55,6 +61,7 @@ func New(cfg config.Config, logger *slog.Logger, out io.Writer, opts Options) *A
 		opts:   opts,
 		panels: ddcOpener{},
 		bus:    nvapiBus{},
+		wake:   wakeDisplay,
 	}
 }
 
@@ -90,6 +97,8 @@ func (a *App) Run(ctx context.Context, cmd string, args []string) error {
 		return a.Table(args, a.cfg.Power, "power")
 	case "raw":
 		return a.Raw(args)
+	case "wake":
+		return a.Wake()
 	case "watch":
 		return a.Watch(ctx)
 	case "volumekeys":

@@ -114,6 +114,15 @@ func (d *debouncer) observe(reading bool) (changed bool) {
 // applyProfile is best-effort: one failing step must not abort the rest, so
 // failures are logged and the next step still runs.
 func (a *App) applyProfile(p config.Profile, event string) {
+	// Wake first. Windows blanks its own output after the display timeout
+	// while the panel stays lit on another machine's input, so switching the
+	// panel here without waking selects an input carrying no signal -- the
+	// handover looks like it silently did nothing. Waking first also gives the
+	// link time to train before the panel arrives on it.
+	if p.Wake {
+		a.applyWake(event)
+	}
+
 	if p.Volume >= 0 {
 		a.log.Info("profile volume", "event", event, "result", a.setVolume(vcp.Level(p.Volume)))
 	}

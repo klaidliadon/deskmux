@@ -147,6 +147,14 @@ type Profile struct {
 	Volume int `yaml:"volume"`
 	// PowerOff powers the monitor down after applying the rest.
 	PowerOff bool `yaml:"power_off"`
+
+	// Wake turns this machine's own display output back on before anything
+	// else. Wanted when the profile claims the panel for this machine, since
+	// Windows blanks its output after the display timeout while the panel
+	// stays lit on whatever else is attached: grabbing it then lands on an
+	// input carrying no signal. Not wanted when handing the panel away, where
+	// it would only keep this machine awake for nothing.
+	Wake bool `yaml:"wake"`
 }
 
 // Watch configures the dock watcher.
@@ -227,7 +235,7 @@ func Default() Config {
 			Match:    []string{"VID_1E91", "VEN_OWC_TB3", "SUBSYS_00191C7A"},
 			Poll:     Duration(2 * time.Second),
 			Debounce: 2,
-			OnDock:   Profile{Input: "usb-c", Volume: -1},
+			OnDock:   Profile{Input: "usb-c", Volume: -1, Wake: true},
 			OnUndock: Profile{Input: "dp", Volume: -1},
 		},
 		VolumeKeys: VolumeKeys{

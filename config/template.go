@@ -84,12 +84,18 @@ watch:
     input: usb-c
     volume: -1
     power_off: false
+    wake: true          # wake this machine's own output first: Windows blanks
+                        # it after the display timeout while the panel stays
+                        # lit on the other machine, so grabbing the panel
+                        # without waking lands on an input with no signal
   on_undock:
     input: dp           # push explicitly; a monitor will not abandon a live
                         # signal just because a new one appeared, so the
                         # monitor's own Auto Input Switch will not do this
     volume: -1
     power_off: false
+    wake: false         # handing the panel away; waking would only keep this
+                        # machine from sleeping
 
 # Volume keys drive the monitor's hardware volume instead of Windows.
 #
