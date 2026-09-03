@@ -1,0 +1,16 @@
+{
+    "version": "0.1.0",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/klaidliadon/deskmux/releases/download/v0.1.0/deskmux_0.1.0_windows_amd64.zip",
+            "bin": [
+                "deskmuxw.exe",
+                "deskmux.exe"
+            ],
+            "hash": "0b14e66e952a026ed38803688a6b7788598ddd00c3dee4096db33209ce1c28f6"
+        }
+    },
+    "homepage": "https://github.com/klaidliadon/deskmux",
+    "license": "MIT",
+    "description": "DDC/CI monitor control for Windows, including input switching on LG panels that ignore VCP 0x60"
+}
