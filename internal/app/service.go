@@ -85,13 +85,13 @@ func (a *App) serviceInstall() error {
 		args := daemonArgs(a.logPath(entry.command), entry.command)
 
 		if a.opts.DryRun {
-			a.printf("dry-run: shortcut %s\n  -> %q %s\n", lnk, exe, args)
+			a.printf("dry-run: shortcut %s\n  -> \"%s\" %s\n", lnk, exe, args)
 			continue
 		}
 		if err := writeShortcut(lnk, exe, args); err != nil {
 			return fmt.Errorf("create %s: %w", lnk, err)
 		}
-		a.printf("installed %s\n  -> %q %s\n", lnk, exe, args)
+		a.printf("installed %s\n  -> \"%s\" %s\n", lnk, exe, args)
 	}
 
 	a.removeLegacyRunValues()
