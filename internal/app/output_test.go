@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -198,15 +199,44 @@ func TestServiceInstallDryRunOutput(t *testing.T) {
 
 	got := out.String()
 	for _, want := range []string{
-		`reg add HKCU\Software\Microsoft\Windows\CurrentVersion\Run`,
-		`/v "deskmux watch"`,
-		`/v "deskmux volumekeys"`,
-		"/t REG_SZ",
-		"-log", // each entry gets its own log, having no console
+		// The Run key never started the daemons; the Startup folder does.
+		`Start Menu\Programs\Startup\deskmux watch.lnk`,
+		`Start Menu\Programs\Startup\deskmux volumekeys.lnk`,
+		`watch.log" watch`, // each daemon gets its own log, having no console
+		`volumekeys.log" volumekeys`,
+		// Upgrading must clear the old registrations that never ran.
+		`reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v "deskmux watch" /f`,
+		`reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v "deskmux volumekeys" /f`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("service install output missing %q:\n%s", want, got)
 		}
+	}
+	if strings.Contains(got, "reg add") {
+		t.Errorf("service install still writes a Run key entry:\n%s", got)
+	}
+}
+
+// Writes a real shortcut and reads it back through the same COM path the
+// daemons' installation uses, in a temp directory so nothing autostarts.
+func TestShortcutRoundTrip(t *testing.T) {
+	lnk := filepath.Join(t.TempDir(), "probe with space.lnk")
+	target := `C:\Windows\System32\cmd.exe`
+	args := daemonArgs(`C:\some dir\watch.log`, "watch")
+
+	if err := writeShortcut(lnk, target, args); err != nil {
+		t.Fatalf("writeShortcut: %v", err)
+	}
+	got, err := readShortcut(lnk)
+	if err != nil {
+		t.Fatalf("readShortcut: %v", err)
+	}
+	if want := `"` + target + `" ` + args; got != want {
+		t.Errorf("read back %q\n     want %q", got, want)
+	}
+
+	if _, err := readShortcut(filepath.Join(t.TempDir(), "absent.lnk")); err == nil {
+		t.Error("reading a missing shortcut should fail, so status reports not installed")
 	}
 }
 

@@ -244,7 +244,7 @@ configuration:
   config path             show where configuration is searched for
   version                 print the version and toolchain
 
-service (per-user autostart entries, run at logon as you):
+service (Startup-folder shortcuts, run at logon as you):
   service install         register watch and volumekeys to start at logon
   service uninstall       remove them
   service status          report whether they are installed
