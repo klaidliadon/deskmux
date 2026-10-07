@@ -1,13 +1,13 @@
 {
-    "version": "0.3.1",
+    "version": "0.3.2",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/klaidliadon/deskmux/releases/download/v0.3.1/deskmux_0.3.1_windows_amd64.zip",
+            "url": "https://github.com/klaidliadon/deskmux/releases/download/v0.3.2/deskmux_0.3.2_windows_amd64.zip",
             "bin": [
                 "deskmux.exe",
                 "deskmuxw.exe"
             ],
-            "hash": "2f5bc475bc0fbc7ef575a2ede524ec587ca75cacc5a8ac291633bfbc6f670828"
+            "hash": "1a7e902ae36eafcfeadf76ba7179efcaaa4ba3b40903d573cb056474a067abb0"
         }
     },
     "homepage": "https://github.com/klaidliadon/deskmux",
