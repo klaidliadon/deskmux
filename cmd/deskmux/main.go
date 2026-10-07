@@ -218,7 +218,8 @@ func usage() {
 usage: deskmux [flags] <command> [args]
 
 daemons:
-  watch                   apply a profile when the configured dock appears
+  daemon                  run every daemon enabled in the config, in one process
+  watch                  apply a profile when the configured dock appears
   volumekeys              volume keys drive the monitor's own volume
 
 control:

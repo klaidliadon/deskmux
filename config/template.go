@@ -73,6 +73,7 @@ power:
 # Find match strings for your own dock with: deskmux devices <substring>
 # Set volume to -1 to leave it alone, or a level to hand over a known volume.
 watch:
+  enabled: true         # run it under deskmux daemon
   match:
     - VID_1E91          # OWC Thunderbolt 3 dock, audio interface
     - VEN_OWC_TB3       # its card reader
@@ -102,6 +103,7 @@ watch:
 # Only active while the default playback device name contains audio_match; on
 # headphones the keys pass through to Windows untouched.
 volume_keys:
+  enabled: true         # run it under deskmux daemon
   step: 1
   pin_windows: true     # hold the Windows endpoint at 100% so the monitor is
                         # the only attenuation stage

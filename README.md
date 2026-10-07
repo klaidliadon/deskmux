@@ -97,6 +97,7 @@ deskmux input usb-c      # switch
 
 | | |
 |---|---|
+| `daemon` | Run every daemon whose config section has `enabled: true` (both by default) in one process; `service install` starts it at logon |
 | `watch` | Apply a profile when a dock appears or disappears |
 | `volumekeys` | Volume keys drive the monitor's own volume |
 

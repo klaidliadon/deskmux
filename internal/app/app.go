@@ -48,19 +48,24 @@ type App struct {
 	// than a direct call so tests can observe it without synthesising real
 	// input events on the developer's desktop.
 	wake func() (time.Duration, error)
+
+	// workers are what Daemon hosts. A field so tests can run Daemon without
+	// hooking the keyboard or scanning devices.
+	workers []worker
 }
 
 // New builds an App. out receives command results, which are program output
 // rather than logs; log receives operational events.
 func New(cfg config.Config, logger *slog.Logger, out io.Writer, opts Options) *App {
 	return &App{
-		cfg:    cfg,
-		log:    logger,
-		out:    out,
-		opts:   opts,
-		panels: ddcOpener{},
-		bus:    nvapiBus{},
-		wake:   wakeDisplay,
+		cfg:     cfg,
+		log:     logger,
+		out:     out,
+		opts:    opts,
+		panels:  ddcOpener{},
+		bus:     nvapiBus{},
+		wake:    wakeDisplay,
+		workers: _workers,
 	}
 }
 
@@ -102,6 +107,8 @@ func (a *App) Run(ctx context.Context, cmd string, args []string) error {
 		return a.Watch(ctx)
 	case "volumekeys":
 		return a.VolumeKeys(ctx)
+	case "daemon":
+		return a.Daemon(ctx)
 	case "devices":
 		return a.Devices(args)
 	case "config":

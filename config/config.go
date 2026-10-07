@@ -159,6 +159,9 @@ type Profile struct {
 
 // Watch configures the dock watcher.
 type Watch struct {
+	// Enabled makes `deskmux daemon` run the watcher.
+	Enabled bool `yaml:"enabled"`
+
 	// Match lists device-ID substrings that identify the dock. Find them
 	// with `deskmux devices <substring>`.
 	Match []string `yaml:"match"`
@@ -175,6 +178,9 @@ type Watch struct {
 
 // VolumeKeys configures volume-key interception.
 type VolumeKeys struct {
+	// Enabled makes `deskmux daemon` run volume-key interception.
+	Enabled bool `yaml:"enabled"`
+
 	Step       int      `yaml:"step"`
 	PinWindows bool     `yaml:"pin_windows"`
 	Coalesce   Duration `yaml:"coalesce"`
@@ -232,6 +238,7 @@ func Default() Config {
 			Modes:      LevelMap{"on": 0x01, "off": 0x04},
 		},
 		Watch: Watch{
+			Enabled:  true,
 			Match:    []string{"VID_1E91", "VEN_OWC_TB3", "SUBSYS_00191C7A"},
 			Poll:     Duration(2 * time.Second),
 			Debounce: 2,
@@ -239,6 +246,7 @@ func Default() Config {
 			OnUndock: Profile{Input: "dp", Volume: -1},
 		},
 		VolumeKeys: VolumeKeys{
+			Enabled:    true,
 			Step:       1,
 			PinWindows: true,
 			Coalesce:   Duration(20 * time.Millisecond),

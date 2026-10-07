@@ -50,7 +50,7 @@ BIN_GUI := $(BINARY)w$(EXE)
 .DEFAULT_GOAL := build
 .PHONY: build gui winres all test cover bench lint fmt vet tidy check clean install \
         service service-install service-uninstall service-status \
-        watch volumekeys probe config version help
+        daemon watch volumekeys probe config version help
 
 ## winres: compile the Windows version resource
 ##
@@ -146,6 +146,10 @@ clean:
 	-$(RM) coverage.out
 	-$(RM) $(SYSO)
 	go clean
+
+## daemon: run every enabled daemon in one process
+daemon: build
+	./$(BIN) daemon
 
 ## watch: run the dock watcher
 watch: build

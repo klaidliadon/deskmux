@@ -263,6 +263,41 @@ func TestPartialProfileKeepsNewFieldDefaults(t *testing.T) {
 	}
 }
 
+// Every existing config file predates `enabled`, and `deskmux daemon` must
+// still run both workers for it.
+func TestWorkersEnabledByDefault(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		watch      bool
+		volumeKeys bool
+	}{
+		{"a file predating the field enables both", "watch:\n  poll: 5s\nvolume_keys:\n  step: 2\n", true, true},
+		{"an explicit false disables one", "volume_keys:\n  enabled: false\n", true, false},
+		{"both can be disabled", "watch:\n  enabled: false\nvolume_keys:\n  enabled: false\n", false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tt.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			cfg, _, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.Watch.Enabled != tt.watch {
+				t.Errorf("watch.enabled = %v, want %v", cfg.Watch.Enabled, tt.watch)
+			}
+			if cfg.VolumeKeys.Enabled != tt.volumeKeys {
+				t.Errorf("volume_keys.enabled = %v, want %v", cfg.VolumeKeys.Enabled, tt.volumeKeys)
+			}
+		})
+	}
+}
+
 // Map iteration order is random, so validating aliases by ranging the map
 // reported a different broken alias on each run and made a deterministic
 // misconfiguration look intermittent.
