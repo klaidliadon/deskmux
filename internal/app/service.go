@@ -42,9 +42,13 @@ var _entries = []struct {
 	name    string // shortcut file name, without .lnk
 	command string
 }{
-	{"deskmux watch", "watch"},
-	{"deskmux volumekeys", "volumekeys"},
+	{"deskmux daemon", "daemon"},
 }
+
+// _legacyShortcuts are the per-daemon shortcuts used up to v0.3.1, before
+// `daemon` hosted both. Left in place they would start a second copy of each
+// worker, which the single-instance guard then turns away.
+var _legacyShortcuts = []string{"deskmux watch", "deskmux volumekeys"}
 
 // _legacyRunValues are the Run key registrations used up to v0.3.0. Install
 // and uninstall both remove them: they never ran, but left behind they would
@@ -94,12 +98,13 @@ func (a *App) serviceInstall() error {
 		a.printf("installed %s\n  -> \"%s\" %s\n", lnk, exe, args)
 	}
 
+	a.removeLegacyShortcuts(dir)
 	a.removeLegacyRunValues()
 
 	if !a.opts.DryRun {
-		a.println("\nThese start at your next logon. To start them now:")
-		a.printf("  %s watch\n", filepath.Base(exe))
-		a.printf("  %s volumekeys\n", filepath.Base(exe))
+		a.println("\nThis starts at your next logon. To start it now, stop any running")
+		a.println("watch or volumekeys first, then run:")
+		a.printf("  %s daemon\n", filepath.Base(exe))
 	}
 	return nil
 }
@@ -131,8 +136,25 @@ func (a *App) serviceUninstall() error {
 		a.printf("not present: %s\n", strings.Join(missing, ", "))
 	}
 
+	a.removeLegacyShortcuts(dir)
 	a.removeLegacyRunValues()
 	return nil
+}
+
+// removeLegacyShortcuts deletes the pre-daemon shortcuts. Absence is the
+// normal case and is not reported.
+func (a *App) removeLegacyShortcuts(dir string) {
+	for _, name := range _legacyShortcuts {
+		lnk := filepath.Join(dir, name+".lnk")
+
+		if a.opts.DryRun {
+			a.printf("dry-run: remove %s\n", lnk)
+			continue
+		}
+		if err := os.Remove(lnk); err == nil {
+			a.printf("removed legacy shortcut %s\n", lnk)
+		}
+	}
 }
 
 // removeLegacyRunValues deletes the pre-v0.3.1 Run key registrations. Absence
@@ -166,6 +188,13 @@ func (a *App) serviceStatus() error {
 			continue
 		}
 		a.printf("%-20s %s\n", entry.name, target)
+	}
+
+	for _, name := range _legacyShortcuts {
+		if _, err := os.Stat(filepath.Join(dir, name+".lnk")); err == nil {
+			a.printf("\nlegacy shortcut %q is still present and runs alongside the daemon;\n"+
+				"`service install` or `service uninstall` removes it\n", name)
+		}
 	}
 
 	// Worth saying out loud: a leftover Run value looks installed in Task

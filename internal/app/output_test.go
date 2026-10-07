@@ -200,10 +200,12 @@ func TestServiceInstallDryRunOutput(t *testing.T) {
 	got := out.String()
 	for _, want := range []string{
 		// The Run key never started the daemons; the Startup folder does.
-		`Start Menu\Programs\Startup\deskmux watch.lnk`,
-		`Start Menu\Programs\Startup\deskmux volumekeys.lnk`,
-		`watch.log" watch`, // each daemon gets its own log, having no console
-		`volumekeys.log" volumekeys`,
+		`Start Menu\Programs\Startup\deskmux daemon.lnk`,
+		`daemon.log" daemon`, // a log file, having no console
+		// Upgrading must clear the per-worker shortcuts daemon replaced.
+		`dry-run: remove C:\`,
+		`Startup\deskmux watch.lnk`,
+		`Startup\deskmux volumekeys.lnk`,
 		// Upgrading must clear the old registrations that never ran.
 		`reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v "deskmux watch" /f`,
 		`reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v "deskmux volumekeys" /f`,

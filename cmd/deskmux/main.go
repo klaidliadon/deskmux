@@ -246,8 +246,8 @@ configuration:
   version                 print the version and toolchain
 
 service (Startup-folder shortcuts, run at logon as you):
-  service install         register watch and volumekeys to start at logon
-  service uninstall       remove them
+  service install         register the daemon to start at logon
+  service uninstall       remove it
   service status          report whether they are installed
 
 flags (must precede the command):
